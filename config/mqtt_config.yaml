@@ -1,0 +1,30 @@
+# config/mqtt_config.yaml
+# ------------------------
+# MQTT broker connection defaults.
+# All values here are overridden by environment variables if set.
+# See .env.example for the environment variable names.
+
+broker:
+  # Host is overridden by MQTT_HOST env var.
+  # Use 'mosquitto' when running inside Docker alongside the POC stack.
+  # Use 'localhost' when running directly on the host machine.
+  host: localhost
+  port: 1883          # overridden by MQTT_PORT
+  username: ""        # overridden by MQTT_USERNAME (leave empty if broker has no auth)
+  password: ""        # overridden by MQTT_PASSWORD
+
+connection:
+  keepalive_seconds: 60        # MQTT PINGREQ interval
+  reconnect_delay_seconds: 5   # wait before reconnect attempt
+  max_reconnect_attempts: 10   # 0 = unlimited retries
+  clean_session: true
+
+publish:
+  qos: 1              # 0 = fire and forget, 1 = at least once, 2 = exactly once
+  retain: false       # do not retain vitals messages on the broker
+
+# Topic pattern: iots/{poc_type}/{persona_id}/{sensor_name}
+# This is informational — the actual topic is built by mqtt_publisher.py
+# using the MQTT_TOPIC_PREFIX env var (default: iots)
+topic:
+  prefix: iots        # overridden by MQTT_TOPIC_PREFIX

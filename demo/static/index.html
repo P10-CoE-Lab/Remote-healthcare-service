@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vitals Simulator — Demo Control</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+           background: #0f1117; color: #e2e8f0;
+           min-height: 100vh; padding: 20px;
+           display: flex; flex-direction: column; }
+    h1 { font-size: 20px; font-weight: 600; color: #fff; margin-bottom: 4px; }
+    .subtitle { font-size: 13px; color: #64748b; margin-bottom: 16px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+            flex: 1; align-content: start; }
+    .card { background: #1e2430; border: 1px solid #2d3748; border-radius: 10px; padding: 20px;
+            display: flex; flex-direction: column; }
+    .card h2 { font-size: 13px; font-weight: 600; text-transform: uppercase;
+                letter-spacing: 0.05em; color: #64748b; margin-bottom: 14px; }
+    label { display: block; font-size: 12px; color: #94a3b8; margin-bottom: 4px; }
+    select, input { width: 100%; background: #0f1117; border: 1px solid #374151;
+                    color: #e2e8f0; padding: 8px 10px; border-radius: 6px;
+                    font-size: 13px; margin-bottom: 10px; }
+    select:focus, input:focus { outline: 2px solid #3b82f6; border-color: transparent; }
+    .btn { display: inline-flex; align-items: center; justify-content: center;
+           padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 500;
+           border: none; cursor: pointer; transition: opacity 0.15s; width: 100%;
+           margin-bottom: 8px; }
+    .btn:hover { opacity: 0.85; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-primary  { background: #3b82f6; color: #fff; }
+    .btn-warning  { background: #f59e0b; color: #000; }
+    .btn-danger   { background: #ef4444; color: #fff; }
+    .btn-neutral  { background: #374151; color: #e2e8f0; }
+    .stat { display: flex; justify-content: space-between; align-items: center;
+            padding: 8px 0; border-bottom: 1px solid #1a2030; }
+    .stat:last-child { border-bottom: none; }
+    .stat-label { font-size: 12px; color: #64748b; }
+    .stat-value { font-size: 14px; font-weight: 600; color: #e2e8f0; font-variant-numeric: tabular-nums; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 99px;
+             font-size: 11px; font-weight: 600; }
+    .badge-green  { background: #052e16; color: #4ade80; }
+    .badge-yellow { background: #422006; color: #fbbf24; }
+    .badge-red    { background: #450a0a; color: #f87171; }
+    .badge-gray   { background: #1f2937; color: #9ca3af; }
+    .progress-bar { background: #1a2030; border-radius: 99px; height: 6px;
+                    overflow: hidden; margin: 10px 0; }
+    .progress-fill { background: #3b82f6; height: 100%; border-radius: 99px;
+                     transition: width 0.5s ease; }
+    .speed-group { display: flex; gap: 6px; flex-wrap: wrap; }
+    .speed-btn { flex: 1; min-width: 48px; background: #374151; color: #e2e8f0;
+                 border: none; padding: 7px 4px; border-radius: 6px; font-size: 12px;
+                 font-weight: 500; cursor: pointer; transition: background 0.15s; }
+    .speed-btn.active { background: #3b82f6; color: #fff; }
+    .speed-btn:hover:not(.active) { background: #4b5563; }
+    .event-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    #log { background: #0f1117; border: 1px solid #1e2430; border-radius: 6px;
+           padding: 10px; font-family: monospace; font-size: 11px; color: #64748b;
+           max-height: 140px; overflow-y: auto; }
+    #log .entry { padding: 1px 0; border-bottom: 1px solid #1a2030; }
+    #log .entry:last-child { border-bottom: none; }
+    .full-width { grid-column: 1 / -1; }
+  </style>
+</head>
+<body>
+
+<h1>Vitals Simulator</h1>
+<p class="subtitle">Demo Control Panel &mdash; Health &amp; Safety IoT Simulator</p>
+
+<div class="grid">
+
+  <!-- Status card -->
+  <div class="card">
+    <h2>Status</h2>
+    <div class="stat">
+      <span class="stat-label">Scenario</span>
+      <span class="stat-value" id="stat-scenario">&mdash;</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Persona</span>
+      <span class="stat-value" id="stat-persona">&mdash;</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Phase</span>
+      <span class="stat-value" id="stat-phase">&mdash;</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Engine</span>
+      <span class="stat-value" id="stat-running"><span class="badge badge-gray">Idle</span></span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Elapsed</span>
+      <span class="stat-value" id="stat-elapsed">&mdash;</span>
+    </div>
+    <div class="progress-bar">
+      <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Messages sent</span>
+      <span class="stat-value" id="stat-seq">0</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Compression</span>
+      <span class="stat-value" id="stat-compression">&mdash;</span>
+    </div>
+  </div>
+
+  <!-- Load scenario card -->
+  <div class="card">
+    <h2>Load Scenario</h2>
+    <label>Persona file</label>
+    <select id="sel-persona"><option value="">Loading...</option></select>
+    <label>Scenario file</label>
+    <select id="sel-scenario"><option value="">Loading...</option></select>
+    <button class="btn btn-primary" id="btn-load">Load Scenario</button>
+    <div style="margin-top: 8px;">
+      <h2 style="margin-bottom: 10px;">Speed</h2>
+      <div class="speed-group" id="speed-group">
+        <button class="speed-btn" data-speed="1">1x</button>
+        <button class="speed-btn" data-speed="5">5x</button>
+        <button class="speed-btn" data-speed="10">10x</button>
+        <button class="speed-btn active" data-speed="60">60x</button>
+        <button class="speed-btn" data-speed="120">120x</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Events card -->
+  <div class="card">
+    <h2>Trigger Events</h2>
+    <div class="event-grid">
+      <button class="btn btn-warning" onclick="trigger('posture_spike')">Posture Spike</button>
+      <button class="btn btn-danger"  onclick="trigger('fall')">Fall Event</button>
+      <button class="btn btn-warning" onclick="trigger('inactivity')">Inactivity</button>
+      <button class="btn btn-warning" onclick="trigger('tachycardia_onset')">Tachycardia</button>
+      <button class="btn btn-warning" onclick="trigger('low_spo2')">Low SpO2</button>
+      <button class="btn btn-neutral" onclick="trigger('posture_spike')">Custom&hellip;</button>
+    </div>
+    <div style="margin-top: 12px;">
+      <label>Custom event type</label>
+      <input type="text" id="custom-event" placeholder="event_type_name" />
+      <button class="btn btn-neutral" onclick="triggerCustom()">Trigger Custom</button>
+    </div>
+  </div>
+
+  <!-- Event log -->
+  <div class="card">
+    <h2>Event Log</h2>
+    <div id="log"><div class="entry" style="color:#4b5563">Waiting for engine&hellip;</div></div>
+  </div>
+
+</div>
+
+<script>
+  const API = '';
+  let pollInterval = null;
+
+  async function fetchStatus() {
+    try {
+      const r = await fetch(API + '/status');
+      if (!r.ok) return;
+      const s = await r.json();
+
+      document.getElementById('stat-scenario').textContent   = s.scenario_id || '—';
+      document.getElementById('stat-persona').textContent    = s.persona_id  || '—';
+      document.getElementById('stat-phase').textContent      = s.current_phase || '—';
+      document.getElementById('stat-elapsed').textContent    =
+        s.elapsed_sim_minutes ? `${s.elapsed_sim_minutes.toFixed(1)} / ${s.total_sim_minutes} min` : '—';
+      document.getElementById('stat-seq').textContent        = s.sequence_number || 0;
+      document.getElementById('stat-compression').textContent = s.compression ? `${s.compression}x` : '—';
+      document.getElementById('progress-fill').style.width   = (s.progress_pct || 0) + '%';
+
+      const runEl = document.getElementById('stat-running');
+      if (s.running) {
+        runEl.innerHTML = '<span class="badge badge-green">Running</span>';
+      } else {
+        runEl.innerHTML = '<span class="badge badge-gray">Idle</span>';
+      }
+    } catch (_) {}
+  }
+
+  async function loadScenario() {
+    const persona  = document.getElementById('sel-persona').value;
+    const scenario = document.getElementById('sel-scenario').value;
+    if (!persona || !scenario) { log('Select a persona and scenario first', 'warn'); return; }
+    try {
+      const r = await fetch(API + '/scenario/load', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ persona_path: persona, scenario_path: scenario })
+      });
+      const d = await r.json();
+      if (r.ok) { log('Scenario loaded: ' + scenario); }
+      else      { log('Error: ' + (d.detail || 'Unknown error'), 'error'); }
+    } catch (e) { log('Network error: ' + e.message, 'error'); }
+  }
+
+  async function trigger(eventType) {
+    try {
+      const r = await fetch(API + '/event/trigger', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ event_type: eventType })
+      });
+      const d = await r.json();
+      if (r.ok) { log('Triggered: ' + eventType); }
+      else      { log('Error: ' + (d.detail || 'Unknown error'), 'error'); }
+    } catch (e) { log('Network error: ' + e.message, 'error'); }
+  }
+
+  function triggerCustom() {
+    const v = document.getElementById('custom-event').value.trim();
+    if (v) trigger(v);
+  }
+
+  async function setSpeed(speed) {
+    try {
+      await fetch(API + '/compression/set', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ compression: parseFloat(speed) })
+      });
+      document.querySelectorAll('.speed-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.speed == speed);
+      });
+      log('Speed set to ' + speed + 'x');
+    } catch (e) { log('Speed error: ' + e.message, 'error'); }
+  }
+
+  async function loadLists() {
+    try {
+      const [pr, sr] = await Promise.all([
+        fetch(API + '/personas').then(r => r.json()),
+        fetch(API + '/scenarios').then(r => r.json()),
+      ]);
+      const ps = document.getElementById('sel-persona');
+      ps.innerHTML = pr.personas.map(p => `<option value="${p}">${p}</option>`).join('');
+
+      const ss = document.getElementById('sel-scenario');
+      ss.innerHTML = sr.scenarios.map(s => `<option value="${s}">${s}</option>`).join('');
+    } catch (e) { log('Could not load file lists: ' + e.message, 'error'); }
+  }
+
+  function log(msg, level) {
+    const el = document.getElementById('log');
+    const color = level === 'error' ? '#f87171' : level === 'warn' ? '#fbbf24' : '#4ade80';
+    const ts = new Date().toTimeString().slice(0, 8);
+    const entry = document.createElement('div');
+    entry.className = 'entry';
+    entry.innerHTML = `<span style="color:#4b5563">${ts}</span> <span style="color:${color}">${msg}</span>`;
+    el.insertBefore(entry, el.firstChild);
+    // Keep last 50 entries
+    while (el.children.length > 50) el.removeChild(el.lastChild);
+  }
+
+  // Wire up speed buttons
+  document.getElementById('speed-group').addEventListener('click', e => {
+    if (e.target.dataset.speed) setSpeed(e.target.dataset.speed);
+  });
+
+  // Load button
+  document.getElementById('btn-load').addEventListener('click', loadScenario);
+
+  // Keyboard shortcut: Enter in custom event field
+  document.getElementById('custom-event').addEventListener('keydown', e => {
+    if (e.key === 'Enter') triggerCustom();
+  });
+
+  // Init
+  loadLists();
+  fetchStatus();
+  pollInterval = setInterval(fetchStatus, 2000);
+</script>
+
+</body>
+</html>
