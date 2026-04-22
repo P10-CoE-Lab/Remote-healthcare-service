@@ -159,10 +159,12 @@ async def main() -> None:
     if args.demo:
         demo_task = asyncio.create_task(_start_demo_api(engine))
 
-    # Wait for shutdown signal or engine completion
+    # With --demo: wait only for SIGTERM/SIGINT — engine reloads via the API must not
+    # trigger a process exit. Without --demo: also exit when the scenario completes.
     shutdown_task = asyncio.create_task(shutdown_event.wait())
+    wait_tasks = [shutdown_task] if args.demo else [engine_task, shutdown_task]
     done, _ = await asyncio.wait(
-        [engine_task, shutdown_task],
+        wait_tasks,
         return_when=asyncio.FIRST_COMPLETED,
     )
 

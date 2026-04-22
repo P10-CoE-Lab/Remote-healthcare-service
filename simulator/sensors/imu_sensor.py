@@ -131,9 +131,10 @@ class IMUSensor(BaseSensor):
                 phase_progress,
             )
 
+        phase_range = self._posture_params.max_value - self._posture_params.min_value
         posture_noisy = self._posture_noise.apply(
             posture_base,
-            self._posture_params.max_value - self._posture_params.min_value,
+            max(phase_range, abs(posture_base)) if override_value is not None else phase_range,
         )
 
         # Correlation: posture drives accel as leader
@@ -152,9 +153,10 @@ class IMUSensor(BaseSensor):
                 phase_progress,
             )
 
+        accel_range = self._accel_params.max_value - self._accel_params.min_value
         accel_noisy = self._accel_noise.apply(
             accel_base,
-            self._accel_params.max_value - self._accel_params.min_value,
+            max(accel_range, abs(accel_base)) if override_accel is not None else accel_range,
         )
         accel_corr_adj = self._correlation.get_adjustment("accel_magnitude", sim_time_seconds)
         accel_correlated = accel_noisy + accel_corr_adj

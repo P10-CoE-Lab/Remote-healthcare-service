@@ -69,6 +69,7 @@ class EngineStatus:
     compression:          float
     events_fired:         list[str]
     sequence_number:      int
+    available_events:     list[dict]
 
 
 # ---------------------------------------------------------------------------
@@ -118,8 +119,11 @@ class ScenarioEngine:
         # Task handles
         self._tasks: list[asyncio.Task] = []
 
+        # Publish callback — stored at start() so reload() can reuse it
+        self._publish_callback: PublishCallback | None = None
+
         # Event queue for manual triggers from demo API
-        self._manual_event_queue: asyncio.Queue[str] = asyncio.Queue()
+        self._manual_event_queue: asyncio.Queue[tuple[str, float | None]] = asyncio.Queue()
 
         # Engine-level config
         engine_cfg = sim_config.get("engine", {})
@@ -227,8 +231,8 @@ class ScenarioEngine:
         if self._scenario is None or self._persona is None:
             raise RuntimeError("Call load() before start()")
 
-        self._running = True
         self._publish_callback = publish_callback
+        self._spawn_tasks()
 
         logger.info(
             "ScenarioEngine starting",
@@ -239,7 +243,38 @@ class ScenarioEngine:
             },
         )
 
-        # One task per sensor + heartbeat + event processor
+        try:
+            await asyncio.gather(*self._tasks)
+        except asyncio.CancelledError:
+            logger.info("Engine tasks cancelled", extra={"event": "engine_cancelled"})
+        finally:
+            self._running = False
+
+    async def reload(self, persona_path: Path | str, scenario_path: Path | str) -> None:
+        """
+        Stop the running simulation, load a new scenario, and restart.
+
+        Safe to call while the engine is running (from the demo API).
+        Reuses the publish callback from the original start() call.
+        """
+        if self._publish_callback is None:
+            raise RuntimeError("Engine has never been started — call start() first")
+        if self._running:
+            await self.stop()
+        self.load(persona_path, scenario_path)
+        self._spawn_tasks()
+        logger.info(
+            "ScenarioEngine reloaded",
+            extra={
+                "event":    "engine_reloaded",
+                "scenario": self._scenario.scenario_id,
+                "persona":  self._persona.persona_id,
+            },
+        )
+
+    def _spawn_tasks(self) -> None:
+        """Create and register all sensor/heartbeat/event asyncio tasks."""
+        self._running = True
         sensor_tasks = [
             asyncio.create_task(
                 self._sensor_loop(sensor),
@@ -253,33 +288,37 @@ class ScenarioEngine:
         event_task = asyncio.create_task(
             self._manual_event_loop(), name="manual_events"
         )
-
         self._tasks = sensor_tasks + [heartbeat_task, event_task]
-
-        try:
-            await asyncio.gather(*self._tasks)
-        except asyncio.CancelledError:
-            logger.info("Engine tasks cancelled", extra={"event": "engine_cancelled"})
-        finally:
-            self._running = False
 
     async def stop(self) -> None:
         """Gracefully stop the simulation."""
         self._running = False
-        for task in self._tasks:
-            if not task.done():
-                task.cancel()
-        await asyncio.gather(*self._tasks, return_exceptions=True)
+        tasks = [t for t in self._tasks if not t.done()]
+        self._tasks = []
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            # asyncio.wait() monitors tasks without registering as a parent waiter,
+            # avoiding the circular-cancellation RecursionError that asyncio.gather()
+            # causes when the same task objects are already gathered in start().
+            await asyncio.wait(tasks, timeout=5.0)
         logger.info("ScenarioEngine stopped", extra={"event": "engine_stopped"})
 
-    def trigger_event(self, event_type: str) -> None:
+    def trigger_event(self, event_type: str, duration_seconds: float | None = None) -> bool:
         """
         Manually fire a named event immediately (from demo API).
 
-        The event is matched by type against the scenario's event list.
-        The first matching event is fired regardless of at_minute.
+        Returns True if the event type exists in the current scenario,
+        False if not found (so the API can return a 404).
+        duration_seconds overrides the event's YAML-defined duration when provided.
         """
-        self._manual_event_queue.put_nowait(event_type)
+        if self._scenario is None:
+            return False
+        matched = any(e.event_type == event_type for e in self._scenario.events)
+        if not matched:
+            return False
+        self._manual_event_queue.put_nowait((event_type, duration_seconds))
+        return True
 
     def set_compression(self, compression: float) -> None:
         """Update time compression at runtime (from demo API speed control)."""
@@ -296,6 +335,11 @@ class ScenarioEngine:
         if self._scenario and self._current_phase_idx < len(self._scenario.phases):
             phase_name = self._scenario.phases[self._current_phase_idx].name
 
+        available = [
+            {"type": e.event_type, "description": e.description}
+            for e in self._scenario.events
+        ] if self._scenario else []
+
         return EngineStatus(
             running=             self._running,
             scenario_id=         self._scenario.scenario_id if self._scenario else "",
@@ -306,6 +350,7 @@ class ScenarioEngine:
             compression=         self._compressor.compression_factor if self._compressor else 1.0,
             events_fired=        list(self._events_fired),
             sequence_number=     self._sequence_number,
+            available_events=    available,
         )
 
     # ------------------------------------------------------------------
@@ -530,8 +575,12 @@ class ScenarioEngine:
                 remaining.append(event)
         self._pending_events = remaining
 
-    def _apply_event(self, event: ScenarioEvent) -> None:
-        """Apply a scenario event — set overrides or inject faults."""
+    def _apply_event(self, event: ScenarioEvent, duration_override: float | None = None) -> None:
+        """Apply a scenario event — set overrides or inject faults.
+
+        duration_override replaces event.duration_seconds when provided (manual trigger from UI).
+        """
+        duration = duration_override if duration_override is not None else event.duration_seconds
         logger.info(
             "Event fired",
             extra={
@@ -539,6 +588,7 @@ class ScenarioEngine:
                 "event_type":  event.event_type,
                 "description": event.description,
                 "at_minute":   event.at_minute,
+                "duration":    duration,
             },
         )
         self._events_fired.append(event.event_type)
@@ -548,14 +598,13 @@ class ScenarioEngine:
             self._fault_ctrl.inject(FaultEvent(
                 sensor_name=     event.sensor,
                 fault_type=      event.fault_type,
-                end_sim_seconds= self._elapsed_sim_seconds + event.duration_seconds,
+                end_sim_seconds= self._elapsed_sim_seconds + duration,
                 fault_factor=    event.fault_factor,
             ))
         else:
-            # Value overrides — temporarily replace sensor output
-            end_real = time.monotonic() + (
-                event.duration_seconds / self._compressor.compression_factor
-            )
+            # Value overrides — duration is real wall-clock seconds so
+            # the override is visible in Grafana regardless of compression setting
+            end_real = time.monotonic() + duration
             for sensor_name, value in event.overrides.items():
                 self._active_overrides[sensor_name] = (value, end_real)
 
@@ -563,7 +612,7 @@ class ScenarioEngine:
         """Process manual event triggers from the demo API."""
         while self._running:
             try:
-                event_type = await asyncio.wait_for(
+                event_type, duration_override = await asyncio.wait_for(
                     self._manual_event_queue.get(), timeout=1.0
                 )
                 # Find the first matching event in the scenario
@@ -572,7 +621,7 @@ class ScenarioEngine:
                     None,
                 )
                 if matched:
-                    self._apply_event(matched)
+                    self._apply_event(matched, duration_override)
                     logger.info(
                         "Manual event triggered",
                         extra={"event": "manual_trigger", "event_type": event_type},

@@ -20,6 +20,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+import yaml
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -31,6 +32,26 @@ logger = get_logger(__name__)
 
 # The engine instance is injected at startup by run.py
 _engine = None
+
+
+# ---------------------------------------------------------------------------
+# Request models — defined at module level so Pydantic v2 can resolve
+# type annotations correctly regardless of from __future__ import annotations
+# ---------------------------------------------------------------------------
+
+class LoadScenarioRequest(BaseModel):
+    persona_path:  str
+    scenario_path: str
+    compression:   float | None = None
+
+
+class TriggerEventRequest(BaseModel):
+    event_type:       str
+    duration_seconds: float | None = None
+
+
+class SetCompressionRequest(BaseModel):
+    compression: float
 
 
 def create_app(engine) -> FastAPI:
@@ -89,35 +110,47 @@ def create_app(engine) -> FastAPI:
                 "compression":          status.compression,
                 "events_fired":         status.events_fired,
                 "sequence_number":      status.sequence_number,
+                "available_events":     status.available_events,
             }
         except Exception as exc:
             logger.error("Status endpoint error", extra={"event": "api_error", "error": str(exc)})
             raise HTTPException(status_code=500, detail="Failed to get engine status")
 
-    class LoadScenarioRequest(BaseModel):
-        persona_path:   str
-        scenario_path:  str
-        compression:    float | None = None
-
     @app.post("/scenario/load")
     async def load_scenario(req: LoadScenarioRequest):
-        """Load a new scenario. Resets the engine."""
+        """Load a new scenario. Auto-resolves persona if mismatched."""
         try:
             persona_path  = Path(req.persona_path)
             scenario_path = Path(req.scenario_path)
 
-            if not persona_path.exists():
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Persona file not found: {req.persona_path}",
-                )
             if not scenario_path.exists():
                 raise HTTPException(
                     status_code=400,
                     detail=f"Scenario file not found: {req.scenario_path}",
                 )
 
-            _engine.load(persona_path, scenario_path)
+            # Auto-resolve persona: read the scenario's required persona and
+            # find the matching file rather than rejecting with a 400 error.
+            auto_resolved = False
+            try:
+                raw = yaml.safe_load(scenario_path.read_text(encoding="utf-8")) or {}
+                required_persona = raw.get("persona", "")
+            except Exception:
+                required_persona = ""
+
+            if required_persona:
+                auto_path = Path("personas") / f"{required_persona}.yaml"
+                if auto_path.exists() and auto_path != persona_path:
+                    persona_path  = auto_path
+                    auto_resolved = True
+
+            if not persona_path.exists():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Persona file not found: {req.persona_path}",
+                )
+
+            await _engine.reload(persona_path, scenario_path)
 
             if req.compression is not None:
                 if req.compression <= 0:
@@ -127,7 +160,10 @@ def create_app(engine) -> FastAPI:
                     )
                 _engine.set_compression(req.compression)
 
-            return {"success": True, "message": "Scenario loaded successfully"}
+            msg = "Scenario loaded successfully"
+            if auto_resolved:
+                msg += f" (auto-matched persona: {persona_path.stem})"
+            return {"success": True, "message": msg}
 
         except HTTPException:
             raise
@@ -138,16 +174,21 @@ def create_app(engine) -> FastAPI:
             )
             raise HTTPException(status_code=400, detail=str(exc))
 
-    class TriggerEventRequest(BaseModel):
-        event_type: str
-
     @app.post("/event/trigger")
     async def trigger_event(req: TriggerEventRequest):
         """Manually fire a named event immediately."""
         try:
             if not req.event_type or not req.event_type.strip():
                 raise HTTPException(status_code=400, detail="event_type cannot be empty")
-            _engine.trigger_event(req.event_type.strip())
+            duration = req.duration_seconds if (
+                req.duration_seconds is not None and req.duration_seconds > 0
+            ) else None
+            found = _engine.trigger_event(req.event_type.strip(), duration)
+            if not found:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Event type '{req.event_type}' not found in current scenario",
+                )
             return {"success": True, "message": f"Event '{req.event_type}' triggered"}
         except HTTPException:
             raise
@@ -157,9 +198,6 @@ def create_app(engine) -> FastAPI:
                 extra={"event": "api_trigger_error", "error": str(exc)},
             )
             raise HTTPException(status_code=400, detail=str(exc))
-
-    class SetCompressionRequest(BaseModel):
-        compression: float
 
     @app.post("/compression/set")
     async def set_compression(req: SetCompressionRequest):
@@ -179,19 +217,26 @@ def create_app(engine) -> FastAPI:
 
     @app.get("/scenarios")
     async def list_scenarios():
-        """List available scenario YAML files."""
+        """List available scenario YAML files with their required persona."""
         try:
             scenarios_dir = Path("scenarios")
             if not scenarios_dir.exists():
                 return {"scenarios": []}
             files = sorted(scenarios_dir.rglob("*.yaml"))
-            return {
-                "scenarios": [
-                    str(f.relative_to(Path(".")))
-                    for f in files
-                    if not f.name.startswith("_")
-                ]
-            }
+            result = []
+            for f in files:
+                if f.name.startswith("_"):
+                    continue
+                try:
+                    raw = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+                    persona_required = raw.get("persona", "")
+                except Exception:
+                    persona_required = ""
+                result.append({
+                    "path":             str(f.relative_to(Path("."))),
+                    "persona_required": persona_required,
+                })
+            return {"scenarios": result}
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc))
 

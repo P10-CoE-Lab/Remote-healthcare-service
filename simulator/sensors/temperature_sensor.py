@@ -85,7 +85,11 @@ class TemperatureSensor(BaseSensor):
                 phase_progress,
             )
 
-        noisy = self._noise_model.apply(base, self._params.max_value - self._params.min_value)
+        phase_range = self._params.max_value - self._params.min_value
+        noisy = self._noise_model.apply(
+            base,
+            max(phase_range, abs(base)) if override_value is not None else phase_range,
+        )
 
         # Correlation: HR elevation slowly warms the skin
         adjustment = self._correlation.get_adjustment("skin_temperature", sim_time_seconds)
