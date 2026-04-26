@@ -187,6 +187,43 @@ class MQTTPublisher:
             "sequence_number": sequence_num,
         }
 
+    def publish_raw(self, topic: str, payload: str, qos: int = None, retain: bool = None) -> None:
+        """
+        Publish raw payload to MQTT topic (used by rules engine).
+        
+        Args:
+            topic: MQTT topic to publish to.
+            payload: Raw payload string.
+            qos: Quality of service level (uses default if None).
+            retain: Retain flag (uses default if None).
+        """
+        if not self._connected:
+            logger.warning(
+                "MQTT not connected — skipping raw publish",
+                extra={"event": "mqtt_publish_skip", "topic": topic}
+            )
+            return
+        
+        try:
+            msg_qos = qos if qos is not None else self._qos
+            msg_retain = retain if retain is not None else self._retain
+            
+            self._client.publish(topic, payload, qos=msg_qos, retain=msg_retain)
+            
+            logger.debug(
+                "MQTT raw message published",
+                extra={"event": "mqtt_raw_publish", "topic": topic, "qos": msg_qos}
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to publish raw MQTT message",
+                extra={
+                    "event": "mqtt_raw_publish_error",
+                    "topic": topic,
+                    "error": str(e)
+                }
+            )
+
     # ------------------------------------------------------------------
     # paho callbacks
     # ------------------------------------------------------------------

@@ -32,12 +32,14 @@ from typing import Any, Callable, Awaitable
 
 from simulator.core.condition_mapper import ConditionMapper
 from simulator.core.persona_loader import Persona, load_persona, ConfigurationError
+from simulator.rules import load_rules_config, RulesConfig, get_default_rules_config
 from simulator.core.scenario_loader import (
     Phase, Scenario, ScenarioEvent, load_scenario,
 )
 from simulator.core.worker_context import WorkerContextProcessor
 from simulator.engine.correlation import CorrelationEngine
 from simulator.engine.fault import FaultController, FaultEvent
+from simulator.rules import RulesEngine
 from simulator.sensors.base import BaseSensor, SensorReading
 from simulator.sensors.heart_rate_sensor import HeartRateSensor
 from simulator.sensors.hrv_sensor import HRVSensor
@@ -91,6 +93,7 @@ class ScenarioEngine:
         self,
         sim_config:  dict[str, Any],
         mqtt_config: dict[str, Any],
+        rules_config_path: Path | str | None = None,
     ) -> None:
         self._sim_config   = sim_config
         self._mqtt_config  = mqtt_config
@@ -102,6 +105,11 @@ class ScenarioEngine:
         self._correlation = CorrelationEngine()
         self._fault_ctrl  = FaultController()
         self._threshold_multiplier: float = 1.0
+        
+        # Rules engine
+        self._rules_config: RulesConfig | None = None
+        self._rules_engine: RulesEngine | None = None
+        self._rules_config_path = rules_config_path or Path("config/rules_config.yaml")
 
         # Runtime state
         self._running:            bool  = False
@@ -192,6 +200,9 @@ class ScenarioEngine:
                 ]
             )
 
+        # Load rules configuration
+        self._load_rules_config()
+
         # Reset state
         self._fault_ctrl  = FaultController()
         self._elapsed_sim_seconds   = 0.0
@@ -233,6 +244,10 @@ class ScenarioEngine:
 
         self._publish_callback = publish_callback
         self._spawn_tasks()
+        
+        # Start rules engine if configured
+        if self._rules_engine:
+            await self._rules_engine.start()
 
         logger.info(
             "ScenarioEngine starting",
@@ -263,6 +278,9 @@ class ScenarioEngine:
             await self.stop()
         self.load(persona_path, scenario_path)
         self._spawn_tasks()
+        # Restart the rules engine for the new scenario
+        if self._rules_engine:
+            asyncio.create_task(self._rules_engine.start())
         logger.info(
             "ScenarioEngine reloaded",
             extra={
@@ -293,6 +311,11 @@ class ScenarioEngine:
     async def stop(self) -> None:
         """Gracefully stop the simulation."""
         self._running = False
+        
+        # Stop rules engine
+        if self._rules_engine:
+            await self._rules_engine.stop()
+            
         tasks = [t for t in self._tasks if not t.done()]
         self._tasks = []
         for task in tasks:
@@ -480,6 +503,15 @@ class ScenarioEngine:
             self._persona.poc_type,
             device_id,
         )
+        
+        # Feed sensor reading to rules engine
+        if self._rules_engine:
+            self._rules_engine.process_sensor_reading(
+                reading,
+                self._persona.persona_id,
+                self._persona.poc_type,
+                device_id,
+            )
 
         # Publish derived streams from IMU
         if isinstance(sensor, IMUSensor) and reading.extra:
@@ -500,6 +532,15 @@ class ScenarioEngine:
                     self._persona.poc_type,
                     device_id,
                 )
+                
+                # Feed extra readings to rules engine too
+                if self._rules_engine:
+                    self._rules_engine.process_sensor_reading(
+                        extra_reading,
+                        self._persona.persona_id,
+                        self._persona.poc_type,
+                        device_id,
+                    )
 
     # ------------------------------------------------------------------
     # Phase management
@@ -713,3 +754,96 @@ class ScenarioEngine:
                 ))
 
         return sensors
+    
+    # ------------------------------------------------------------------
+    # Rules engine integration
+    # ------------------------------------------------------------------
+    
+    def _load_rules_config(self) -> None:
+        """Load rules configuration and initialize rules engine."""
+        try:
+            # Try to load rules config
+            if Path(self._rules_config_path).exists():
+                self._rules_config = load_rules_config(self._rules_config_path)
+                logger.info(
+                    "Rules config loaded",
+                    extra={
+                        "event": "rules_config_loaded",
+                        "path": str(self._rules_config_path),
+                        "rules_count": len(self._rules_config.rules)
+                    }
+                )
+            else:
+                # Use default empty config
+                self._rules_config = get_default_rules_config()
+                logger.info(
+                    "No rules config found, using defaults",
+                    extra={
+                        "event": "rules_config_default",
+                        "path": str(self._rules_config_path)
+                    }
+                )
+            
+            # Initialize rules engine (will be started when scenario starts)
+            if self._rules_config.rules:
+                # We'll pass the MQTT publisher when we have it
+                self._rules_engine = RulesEngine(
+                    config=self._rules_config,
+                    mqtt_publisher=None,  # Will be set later
+                    scenario_engine=self,
+                )
+        except Exception as e:
+            logger.warning(
+                "Failed to load rules config",
+                extra={
+                    "event": "rules_config_error",
+                    "path": str(self._rules_config_path),
+                    "error": str(e)
+                }
+            )
+            # Continue without rules engine
+            self._rules_config = get_default_rules_config()
+            self._rules_engine = None
+    
+    def set_mqtt_publisher(self, mqtt_publisher: Any) -> None:
+        """Set the MQTT publisher for the rules engine."""
+        if self._rules_engine:
+            self._rules_engine._mqtt_publisher = mqtt_publisher
+    
+    async def trigger_manual_event(self, event_name: str, duration: float | None = None) -> bool:
+        """
+        Trigger a manual event (used by rules engine).
+        
+        Args:
+            event_name: Name of the event to trigger.
+            duration: Optional duration override.
+            
+        Returns:
+            True if event was queued successfully.
+        """
+        try:
+            await self._manual_event_queue.put((event_name, duration))
+            return True
+        except Exception as e:
+            logger.error(
+                "Failed to trigger manual event",
+                extra={
+                    "event": "manual_event_error",
+                    "event_name": event_name,
+                    "error": str(e)
+                }
+            )
+            return False
+    
+    def get_rules_status(self) -> dict[str, Any]:
+        """Get current rules engine status."""
+        if not self._rules_engine:
+            return {
+                "enabled": False,
+                "message": "Rules engine not configured"
+            }
+        
+        return {
+            "enabled": True,
+            **self._rules_engine.get_status()
+        }

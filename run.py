@@ -103,6 +103,12 @@ async def main() -> None:
         action="store_true",
         help="Start the FastAPI demo control UI alongside the simulation",
     )
+    parser.add_argument(
+        "--rules-config",
+        type=str,
+        default=None,
+        help="Path to rules configuration YAML file (default: config/rules_config.yaml)",
+    )
     args = parser.parse_args()
 
     # Load config files
@@ -110,8 +116,13 @@ async def main() -> None:
     sim_config   = _load_yaml(config_dir / "simulator_config.yaml")
     mqtt_config  = _load_yaml(config_dir / "mqtt_config.yaml")
 
-    # Build engine
-    engine = ScenarioEngine(sim_config=sim_config, mqtt_config=mqtt_config)
+    # Build engine with optional rules config path
+    rules_config_path = args.rules_config or config_dir / "rules_config.yaml"
+    engine = ScenarioEngine(
+        sim_config=sim_config, 
+        mqtt_config=mqtt_config,
+        rules_config_path=rules_config_path
+    )
 
     # Load persona and scenario
     engine.load(
@@ -126,6 +137,9 @@ async def main() -> None:
     # Connect MQTT publisher
     publisher = MQTTPublisher(mqtt_config)
     publisher.connect()
+    
+    # Set MQTT publisher for rules engine
+    engine.set_mqtt_publisher(publisher)
 
     # Publish callback
     publish_cb = _make_publish_callback(publisher, engine)

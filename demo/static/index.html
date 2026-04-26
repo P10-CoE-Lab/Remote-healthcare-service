@@ -222,6 +222,8 @@
   const API = '';
   let pollInterval = null;
   let _lastEventSig = '';
+  let _lastEventCount = 0;
+  let _lastEventLogSig = '';
 
   const DANGER_EVENTS = new Set(['fall', 'cardiac_arrest', 'collapse']);
 
@@ -239,6 +241,27 @@
       const label = e.description.length > 24 ? e.description.slice(0, 22) + '…' : e.description;
       return `<button class="btn ${cls}" onclick="trigger('${e.type}')" title="${e.description}">${label}</button>`;
     }).join('');
+  }
+
+  async function fetchRecentEvents() {
+    try {
+      const r = await fetch(API + '/events/recent');
+      if (!r.ok) return;
+      const data = await r.json();
+      
+      // Only update if we have new events
+      if (data.events && data.events.length > _lastEventCount) {
+        const newEvents = data.events.slice(_lastEventCount);
+        newEvents.forEach(event => {
+          const color = event.type === 'violation' ? '#f87171' : '#4ade80';
+          const icon = event.type === 'violation' ? '⚠️' : '📋';
+          log(`${icon} ${event.description}`, event.type === 'violation' ? 'error' : 'info');
+        });
+        _lastEventCount = data.events.length;
+      }
+    } catch (e) {
+      // Silently fail - this is optional enhancement
+    }
   }
 
   async function fetchStatus() {
@@ -395,7 +418,13 @@
 
   function log(msg, level) {
     const el = document.getElementById('log');
-    const color = level === 'error' ? '#f87171' : level === 'warn' ? '#fbbf24' : '#4ade80';
+    let color = '#4ade80'; // default green
+    
+    if (level === 'error') color = '#f87171';
+    else if (level === 'warn') color = '#fbbf24';
+    else if (level === 'violation') color = '#f87171';
+    else if (level === 'scenario') color = '#fbbf24';
+    
     const ts = new Date().toTimeString().slice(0, 8);
     const entry = document.createElement('div');
     entry.className = 'entry';
@@ -416,7 +445,11 @@
 
   loadLists();
   fetchStatus();
-  pollInterval = setInterval(fetchStatus, 2000);
+  fetchRecentEvents();
+  pollInterval = setInterval(() => {
+    fetchStatus();
+    fetchRecentEvents();
+  }, 2000);
 </script>
 
 </body>

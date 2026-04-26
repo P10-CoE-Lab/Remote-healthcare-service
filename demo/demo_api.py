@@ -17,6 +17,7 @@ Serves the static index.html for the demo control UI.
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -96,6 +97,8 @@ def create_app(engine) -> FastAPI:
         """Return current engine state."""
         try:
             status = _engine.get_status()
+            rules_status = _engine.get_rules_status()
+            
             return {
                 "running":              status.running,
                 "scenario_id":          status.scenario_id,
@@ -111,10 +114,98 @@ def create_app(engine) -> FastAPI:
                 "events_fired":         status.events_fired,
                 "sequence_number":      status.sequence_number,
                 "available_events":     status.available_events,
+                "rules":                rules_status,
             }
         except Exception as exc:
             logger.error("Status endpoint error", extra={"event": "api_error", "error": str(exc)})
             raise HTTPException(status_code=500, detail="Failed to get engine status")
+    
+    @app.get("/rules/status")
+    async def get_rules_status():
+        """Return detailed rules engine status."""
+        try:
+            return _engine.get_rules_status()
+        except Exception as exc:
+            logger.error("Rules status endpoint error", extra={"event": "api_error", "error": str(exc)})
+            raise HTTPException(status_code=500, detail="Failed to get rules status")
+    
+    @app.get("/events")
+    async def get_fired_events():
+        """Return list of events that have been fired, including rule violations."""
+        try:
+            status = _engine.get_status()
+            events_fired = status.events_fired or []
+            
+            # Add descriptions for events
+            event_details = []
+            for event_name in events_fired:
+                if event_name.startswith("rule_violation_"):
+                    # Get rule details for violations
+                    rule_id = event_name.replace("rule_violation_", "")
+                    rule_name = rule_id.replace("_", " ").title()
+                    event_details.append({
+                        "type": event_name,
+                        "description": f"Rule Violation: {rule_name}",
+                        "category": "violation"
+                    })
+                else:
+                    # Regular scenario events  
+                    event_details.append({
+                        "type": event_name,
+                        "description": event_name.replace("_", " ").title(),
+                        "category": "scenario"
+                    })
+            
+            return {"events": event_details}
+        except Exception as exc:
+            logger.error("Events endpoint error", extra={"event": "api_error", "error": str(exc)})
+            raise HTTPException(status_code=500, detail="Failed to get events")
+
+    @app.get("/rules/violations")
+    async def get_recent_violations():
+        """Return recent rule violations."""
+        try:
+            rules_engine = _engine._rules_engine
+            if not rules_engine:
+                return {"violations": [], "message": "Rules engine not enabled"}
+            
+            violations = rules_engine.get_recent_violations(limit=20)
+            return {"violations": violations}
+        except Exception as exc:
+            logger.error("Rules violations endpoint error", extra={"event": "api_error", "error": str(exc)})
+            raise HTTPException(status_code=500, detail="Failed to get rule violations")
+    
+    @app.get("/events/recent")
+    async def get_recent_events():
+        """Return recent events including violations for demo UI log."""
+        try:
+            status = _engine.get_status()
+            events = []
+            
+            # Add regular scenario events
+            for event in status.events_fired[-10:]:  # Last 10 events
+                if event.startswith("rule_violation_"):
+                    # This is a violation event
+                    rule_id = event.replace("rule_violation_", "")
+                    events.append({
+                        "type": "violation", 
+                        "name": event,
+                        "description": f"Rule violation: {rule_id}",
+                        "timestamp": time.time()
+                    })
+                else:
+                    # Regular scenario event
+                    events.append({
+                        "type": "scenario",
+                        "name": event,
+                        "description": f"Scenario event: {event}",
+                        "timestamp": time.time()
+                    })
+            
+            return {"events": events}
+        except Exception as exc:
+            logger.error("Recent events endpoint error", extra={"event": "api_error", "error": str(exc)})
+            raise HTTPException(status_code=500, detail="Failed to get recent events")
 
     @app.post("/scenario/load")
     async def load_scenario(req: LoadScenarioRequest):

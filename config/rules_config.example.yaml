@@ -1,0 +1,70 @@
+# Example rules configuration showing advanced features
+# Copy this to rules_config.yaml and customize for your use case
+
+schema_version: "1.0"
+
+engine:
+  evaluation_interval_seconds: 0.5  # Evaluate rules every 500ms
+  max_violation_history: 500
+  log_evaluations: true
+  publish_violations: true
+
+rules:
+  # Time-based rule (only active during certain hours)
+  - id: "night_shift_heart_rate"
+    name: "Night Shift Heart Rate Monitor"
+    description: "More sensitive HR monitoring during night shifts"
+    category: "safety"
+    severity: "warning"
+    enabled: true
+    
+    # Rule only active during night shift hours
+    time_constraints:
+      start_hour: 22  # 10 PM
+      end_hour: 6     # 6 AM
+    
+    conditions:
+      - sensor: "heart_rate"
+        operator: ">"
+        threshold: 95  # Lower threshold at night
+        duration_seconds: 45
+    
+    actions:
+      - type: "log"
+        message: "Night shift elevated HR: {persona_id} = {value} bpm"
+
+  # Trend-based rule (rate of change)
+  - id: "rapid_heart_rate_increase"
+    name: "Rapid Heart Rate Increase"
+    description: "Detect sudden spikes in heart rate"
+    category: "health"
+    severity: "warning"
+    enabled: true
+    
+    conditions:
+      - sensor: "heart_rate"
+        operator: "rate_increase"
+        threshold: 20  # 20 bpm increase
+        window_seconds: 60  # Within 1 minute
+    
+    actions:
+      - type: "mqtt_alert"
+        topic: "alerts/trends/{persona_id}/hr_spike"
+
+  # Statistical rule (standard deviation)
+  - id: "heart_rate_variability_spike"
+    name: "Abnormal Heart Rate Pattern"
+    description: "Detect irregular heart rate patterns"
+    category: "health"
+    severity: "info"
+    enabled: true
+    
+    conditions:
+      - sensor: "heart_rate"
+        operator: "std_dev"
+        threshold: 15  # Standard deviation > 15
+        window_seconds: 300  # Over 5 minutes
+    
+    actions:
+      - type: "log"
+        message: "Irregular HR pattern for {persona_id}: σ={calculated_value}"

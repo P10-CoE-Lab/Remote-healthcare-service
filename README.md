@@ -109,6 +109,7 @@ vitals-simulator/
 ├── simulator/
 │   ├── core/                  Scenario engine, YAML loaders, condition mapper
 │   ├── engine/                Signal, noise, correlation, fault generators
+│   ├── rules/                 Rules engine for monitoring and alerts (separate from ingestion)
 │   ├── sensors/               Per-sensor generators + registry
 │   ├── transport/             MQTT publisher
 │   └── utils/                 Logger, time compressor
