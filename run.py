@@ -152,8 +152,16 @@ async def main() -> None:
         logger.info("Shutdown signal received", extra={"event": "shutdown_signal"})
         shutdown_event.set()
 
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, _handle_signal)
+    # Signal handlers are not supported on Windows
+    import platform
+    if platform.system() != "Windows":
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, _handle_signal)
+    else:
+        # On Windows, use keyboard interrupt handler instead
+        def _windows_signal_handler():
+            _handle_signal()
+        signal.signal(signal.SIGINT, lambda s, f: _handle_signal())
 
     logger.info(
         "Simulator starting",

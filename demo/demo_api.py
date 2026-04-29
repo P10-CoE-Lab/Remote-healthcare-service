@@ -145,7 +145,7 @@ def create_app(engine) -> FastAPI:
                     rule_name = rule_id.replace("_", " ").title()
                     event_details.append({
                         "type": event_name,
-                        "description": f"Rule Violation: {rule_name}",
+                        "description": "Rule Violation: {rule_name}",
                         "category": "violation"
                     })
                 else:
