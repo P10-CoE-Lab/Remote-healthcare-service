@@ -1,0 +1,29 @@
+providers:
+  email:
+    default: gmail
+    fallback: mailhog
+  sms:
+    default: twilio
+    fallback: null
+  webhook:
+    default: generic
+    fallback: null
+
+profiles:
+  sensor_alert:
+    rules:
+      - default: true
+        channels: [email]
+        priority: high
+
+  maintenance_report:
+    rules:
+      - default: true
+        channels: [email]
+        priority: medium
+
+  system_health:
+    rules:
+      - default: true
+        channels: [email]
+        priority: low
