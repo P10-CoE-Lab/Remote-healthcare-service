@@ -123,6 +123,42 @@
            font-size: 13px; color: #64748b; overflow-y: auto; min-height: 0; }
     #log .entry { padding: 5px 0; border-bottom: 1px solid #111827; line-height: 1.6; }
     #log .entry:last-child { border-bottom: none; }
+
+    /* ── Tabs ── */
+    .tabs { flex-shrink: 0; display: flex; gap: 4px; border-bottom: 1px solid #2d3748;
+            padding-bottom: 0; margin-bottom: 0; }
+    .tab-btn { background: none; border: none; color: #64748b; font-size: 14px;
+               font-weight: 600; padding: 8px 20px; border-radius: 8px 8px 0 0;
+               cursor: pointer; border-bottom: 2px solid transparent;
+               transition: color 0.15s, border-color 0.15s; margin-bottom: -1px; }
+    .tab-btn:hover { color: #e2e8f0; }
+    .tab-btn.active { color: #e2e8f0; border-bottom-color: #3b82f6; }
+    .tab-panel { display: none; flex: 1; min-height: 0; }
+    .tab-panel.active { display: flex; flex-direction: column; }
+
+    /* ── Rules tab layout ── */
+    .rules-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+                  flex: 1; min-height: 0; }
+
+    /* ── Rules list ── */
+    .rule-item { padding: 10px 0; border-bottom: 1px solid #1a2030; flex-shrink: 0; }
+    .rule-item:last-child { border-bottom: none; }
+    .rule-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; }
+    .rule-name { font-size: 14px; font-weight: 600; color: #e2e8f0; }
+    .rule-desc { font-size: 12px; color: #64748b; }
+    .rule-list { flex: 1; overflow-y: auto; min-height: 0; }
+
+    /* ── Violations list ── */
+    .violation-item { padding: 10px 0; border-bottom: 1px solid #1a2030; flex-shrink: 0; }
+    .violation-item:last-child { border-bottom: none; }
+    .violation-rule { font-size: 13px; font-weight: 600; color: #f87171; margin-bottom: 2px; }
+    .violation-detail { font-size: 12px; color: #64748b; font-family: "JetBrains Mono", "Fira Code", monospace; }
+    .violation-list { flex: 1; overflow-y: auto; min-height: 0; }
+
+    /* ── Severity badges ── */
+    .sev-critical { background: #450a0a; color: #f87171; }
+    .sev-warning  { background: #422006; color: #fbbf24; }
+    .sev-info     { background: #0c1a2e; color: #60a5fa; }
   </style>
 </head>
 <body>
@@ -132,6 +168,12 @@
   <p class="subtitle">Demo Control Panel &mdash; Health &amp; Safety IoT Simulator</p>
 </div>
 
+<div class="tabs">
+  <button class="tab-btn active" data-tab="simulator">Simulator</button>
+  <button class="tab-btn" data-tab="rules">Rules</button>
+</div>
+
+<div class="tab-panel active" id="tab-simulator">
 <div class="grid">
 
   <!-- Status card -->
@@ -217,6 +259,29 @@
   </div>
 
 </div>
+</div><!-- end #tab-simulator -->
+
+<div class="tab-panel" id="tab-rules">
+  <div class="rules-grid">
+
+    <!-- Active Rules card -->
+    <div class="card">
+      <div class="card-title">Active Rules</div>
+      <div class="rule-list" id="rules-list">
+        <p style="color:#475569;font-size:14px">Loading rules&hellip;</p>
+      </div>
+    </div>
+
+    <!-- Recent Violations card -->
+    <div class="card">
+      <div class="card-title">Recent Violations</div>
+      <div class="violation-list" id="violations-list">
+        <p style="color:#475569;font-size:14px">No violations yet.</p>
+      </div>
+    </div>
+
+  </div>
+</div><!-- end #tab-rules -->
 
 <script>
   const API = '';
@@ -224,6 +289,18 @@
   let _lastEventSig = '';
   let _lastEventCount = 0;
   let _lastEventLogSig = '';
+  let _lastRulesSig = '';
+  let _lastViolationCount = 0;
+
+  // ── Tab switching ──
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    });
+  });
 
   const DANGER_EVENTS = new Set(['fall', 'cardiac_arrest', 'collapse']);
 
@@ -443,12 +520,75 @@
     if (e.key === 'Enter') triggerCustom();
   });
 
+  async function fetchRules() {
+    try {
+      const r = await fetch(API + '/rules/status');
+      if (!r.ok) return;
+      const data = await r.json();
+      const rules = data.rules || [];
+      const sig = JSON.stringify(rules.map(r => r.id + r.enabled));
+      if (sig === _lastRulesSig) return;
+      _lastRulesSig = sig;
+
+      const el = document.getElementById('rules-list');
+      if (!rules.length) {
+        el.innerHTML = '<p style="color:#475569;font-size:14px">No rules configured.</p>';
+        return;
+      }
+      el.innerHTML = rules.map(rule => {
+        const sevCls = rule.severity === 'critical' ? 'sev-critical'
+                     : rule.severity === 'warning'  ? 'sev-warning' : 'sev-info';
+        const enabledBadge = rule.enabled
+          ? '<span class="badge badge-green" style="font-size:11px;padding:2px 8px">ON</span>'
+          : '<span class="badge badge-gray"  style="font-size:11px;padding:2px 8px">OFF</span>';
+        return `<div class="rule-item">
+          <div class="rule-header">
+            <span class="rule-name">${rule.name || rule.id}</span>
+            <span style="display:flex;gap:6px;align-items:center">
+              <span class="badge ${sevCls}" style="font-size:11px;padding:2px 8px">${rule.severity || 'info'}</span>
+              ${enabledBadge}
+            </span>
+          </div>
+          <div class="rule-desc">${rule.description || ''}</div>
+        </div>`;
+      }).join('');
+    } catch (e) { /* silently fail */ }
+  }
+
+  async function fetchViolations() {
+    try {
+      const r = await fetch(API + '/rules/violations');
+      if (!r.ok) return;
+      const data = await r.json();
+      const violations = data.violations || [];
+      if (violations.length === _lastViolationCount) return;
+      _lastViolationCount = violations.length;
+
+      const el = document.getElementById('violations-list');
+      if (!violations.length) {
+        el.innerHTML = '<p style="color:#475569;font-size:14px">No violations yet.</p>';
+        return;
+      }
+      el.innerHTML = violations.slice().reverse().map(v => {
+        const ts = v.timestamp ? new Date(v.timestamp * 1000).toTimeString().slice(0, 8) : '';
+        return `<div class="violation-item">
+          <div class="violation-rule">&#9888; ${v.rule_name || v.rule_id || 'Unknown rule'}</div>
+          <div class="violation-detail">${ts ? ts + ' &mdash; ' : ''}${v.message || JSON.stringify(v)}</div>
+        </div>`;
+      }).join('');
+    } catch (e) { /* silently fail */ }
+  }
+
   loadLists();
   fetchStatus();
   fetchRecentEvents();
+  fetchRules();
+  fetchViolations();
   pollInterval = setInterval(() => {
     fetchStatus();
     fetchRecentEvents();
+    fetchRules();
+    fetchViolations();
   }, 2000);
 </script>
 
