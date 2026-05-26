@@ -20,6 +20,14 @@ from .loader import (
     RuleAction,
     RulesConfigError
 )
+from .risk_loader import (
+    load_risk_scoring_config,
+    get_default_risk_scoring_config,
+    RiskScoringConfig,
+    RiskRule,
+    RiskConfigError,
+)
+from .risk_scoring import RiskScoringEngine
 
 __all__ = [
     'RulesEngine',
@@ -29,5 +37,11 @@ __all__ = [
     'Rule',
     'RuleCondition',
     'RuleAction',
-    'RulesConfigError'
+    'RulesConfigError',
+    'load_risk_scoring_config',
+    'get_default_risk_scoring_config',
+    'RiskScoringConfig',
+    'RiskRule',
+    'RiskConfigError',
+    'RiskScoringEngine',
 ]

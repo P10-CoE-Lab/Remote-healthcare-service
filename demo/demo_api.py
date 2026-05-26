@@ -55,6 +55,10 @@ class SetCompressionRequest(BaseModel):
     compression: float
 
 
+class RiskContextUpdateRequest(BaseModel):
+    context: dict[str, Any]
+
+
 def create_app(engine) -> FastAPI:
     """
     Create the FastAPI application with the engine injected.
@@ -98,6 +102,7 @@ def create_app(engine) -> FastAPI:
         try:
             status = _engine.get_status()
             rules_status = _engine.get_rules_status()
+            risk_status = _engine.get_risk_status()
             
             return {
                 "running":              status.running,
@@ -115,6 +120,7 @@ def create_app(engine) -> FastAPI:
                 "sequence_number":      status.sequence_number,
                 "available_events":     status.available_events,
                 "rules":                rules_status,
+                "risk":                 risk_status,
             }
         except Exception as exc:
             logger.error("Status endpoint error", extra={"event": "api_error", "error": str(exc)})
@@ -128,6 +134,34 @@ def create_app(engine) -> FastAPI:
         except Exception as exc:
             logger.error("Rules status endpoint error", extra={"event": "api_error", "error": str(exc)})
             raise HTTPException(status_code=500, detail="Failed to get rules status")
+
+    @app.get("/risk/status")
+    async def get_risk_status():
+        """Return risk scoring status (R1-R10)."""
+        try:
+            return _engine.get_risk_status()
+        except Exception as exc:
+            logger.error("Risk status endpoint error", extra={"event": "api_error", "error": str(exc)})
+            raise HTTPException(status_code=500, detail="Failed to get risk status")
+
+    @app.get("/risk/snapshots")
+    async def get_risk_snapshots(limit: int = 20):
+        """Return recent risk score snapshots."""
+        try:
+            limit = max(1, min(limit, 200))
+            return {"snapshots": _engine.get_recent_risk_snapshots(limit)}
+        except Exception as exc:
+            logger.error("Risk snapshots endpoint error", extra={"event": "api_error", "error": str(exc)})
+            raise HTTPException(status_code=500, detail="Failed to get risk snapshots")
+
+    @app.post("/risk/context")
+    async def update_risk_context(req: RiskContextUpdateRequest):
+        """Update risk context payload and return recalculated score."""
+        try:
+            return _engine.update_risk_context(req.context)
+        except Exception as exc:
+            logger.error("Risk context endpoint error", extra={"event": "api_error", "error": str(exc)})
+            raise HTTPException(status_code=400, detail=f"Failed to update risk context: {exc}")
     
     @app.get("/events")
     async def get_fired_events():
@@ -145,7 +179,7 @@ def create_app(engine) -> FastAPI:
                     rule_name = rule_id.replace("_", " ").title()
                     event_details.append({
                         "type": event_name,
-                        "description": "Rule Violation: {rule_name}",
+                        "description": f"Rule Violation: {rule_name}",
                         "category": "violation"
                     })
                 else:

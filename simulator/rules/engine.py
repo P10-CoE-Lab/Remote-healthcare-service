@@ -32,11 +32,15 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .loader import (
     Rule, RuleCondition, RuleAction, RulesConfig, TimeConstraint
 )
+from .risk_loader import load_risk_scoring_config
+from .risk_scoring import RiskScoringEngine
+from .timing_policy import load_timing_policy
 from simulator.sensors.base import SensorReading
 from simulator.utils.logger import get_logger
 
@@ -110,10 +114,18 @@ class RulesEngine:
         config: RulesConfig,
         mqtt_publisher: Any = None,
         scenario_engine: Any = None,
+        risk_config_path: Path | str | None = None,
+        timing_policy_path: Path | str | None = None,
     ) -> None:
         self._config = config
         self._mqtt_publisher = mqtt_publisher
         self._scenario_engine = scenario_engine
+        self._risk_engine: RiskScoringEngine | None = None
+
+        # Unified timing policy for threshold + risk rules
+        self._timing_policy_path = timing_policy_path or Path("config/rule_timing_policy.yaml")
+        self._timing_policy = load_timing_policy(self._timing_policy_path)
+        self._apply_timing_policy_to_threshold_rules()
         
         # Sensor data storage (sensor_name -> deque of SensorDataPoint)
         self._sensor_data: Dict[str, deque] = defaultdict(
@@ -141,6 +153,50 @@ class RulesEngine:
         self._current_persona_id: Optional[str] = None
         self._current_poc_type: Optional[str] = None
         self._current_device_id: Optional[str] = None
+
+        # Risk scoring engine (R1-R10)
+        try:
+            risk_cfg = load_risk_scoring_config(
+                risk_config_path or Path("config/risk_rules.yaml")
+            )
+            self._apply_timing_policy_to_risk_rules(risk_cfg)
+            self._risk_engine = RiskScoringEngine(risk_cfg)
+            logger.info(
+                "Risk scoring engine initialized",
+                extra={
+                    "event": "risk_engine_init",
+                    "rules_count": len(risk_cfg.rules),
+                }
+            )
+        except Exception as e:
+            logger.warning(
+                "Risk scoring engine disabled",
+                extra={"event": "risk_engine_disabled", "error": str(e)}
+            )
+
+    def _apply_timing_policy_to_threshold_rules(self) -> None:
+        """Apply unified timing policy to threshold rule durations."""
+        windows = self._timing_policy.rule_windows_seconds
+        if not windows:
+            return
+
+        for rule in self._config.rules:
+            if rule.id not in windows:
+                continue
+
+            duration = windows[rule.id]
+            for condition in rule.conditions:
+                condition.duration_seconds = duration
+
+    def _apply_timing_policy_to_risk_rules(self, risk_cfg: Any) -> None:
+        """Apply unified timing policy to risk rule evaluation windows."""
+        windows = self._timing_policy.rule_windows_seconds
+        if not windows:
+            return
+
+        for rule in risk_cfg.rules:
+            if rule.id in windows:
+                rule.evaluation_window_seconds = windows[rule.id]
         
         logger.info(
             "Rules engine initialized",
@@ -229,6 +285,10 @@ class RulesEngine:
         )
         
         self._sensor_data[reading.sensor_name].append(data_point)
+
+        # Feed risk engine
+        if self._risk_engine:
+            self._risk_engine.process_sensor_reading(reading)
         
         if self._config.engine.log_evaluations:
             logger.debug(
@@ -252,6 +312,22 @@ class RulesEngine:
                 
                 current_time = time.time()
                 await self._evaluate_all_rules(current_time)
+
+                # Evaluate risk scoring R1-R10
+                if self._risk_engine:
+                    risk_snapshot = self._risk_engine.evaluate(current_time)
+                    if risk_snapshot.risk_level in {"high", "critical"}:
+                        logger.warning(
+                            "High worker risk detected",
+                            extra={
+                                "event": "risk_score_high",
+                                "risk_score": risk_snapshot.risk_score,
+                                "risk_level": risk_snapshot.risk_level,
+                                "active_rules": risk_snapshot.active_rule_ids,
+                                "persona_id": self._current_persona_id,
+                            }
+                        )
+
                 self._last_evaluation_time = current_time
                 
             except asyncio.CancelledError:
@@ -464,6 +540,10 @@ class RulesEngine:
         # Create violation record
         violation = self._create_violation_record(rule_state, current_time)
         self._violation_history.append(violation)
+
+        # Feed rule trigger into risk engine for R10 counting
+        if self._risk_engine:
+            self._risk_engine.process_safety_event(f"rule_violation:{rule.id}")
         
         # Execute actions
         for action in rule.actions:
@@ -706,6 +786,13 @@ class RulesEngine:
         total_rules = len(self._config.rules)
         enabled_rules = len([r for r in self._config.rules if r.enabled])
         active_rules = len([rs for rs in self._rule_states.values() if rs.is_currently_triggered])
+
+        risk_status = self._risk_engine.get_status() if self._risk_engine else {
+            "enabled": False,
+            "risk_score": 0,
+            "risk_level": "none",
+            "active_rule_ids": [],
+        }
         
         return {
             "running": self._running,
@@ -715,6 +802,7 @@ class RulesEngine:
             "violation_count": len(self._violation_history),
             "last_evaluation_time": self._last_evaluation_time,
             "evaluation_interval": self._config.engine.evaluation_interval_seconds,
+            "risk": risk_status,
         }
     
     def get_rule_states(self) -> Dict[str, Any]:
@@ -792,6 +880,32 @@ class RulesEngine:
                 logger.info(f"Rule disabled: {rule_id}")
                 return True
         return False
+
+    def update_risk_context(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Update risk scoring context (zone/machine/PPE/shift/location)."""
+        if not self._risk_engine:
+            return {"enabled": False, "message": "Risk scoring engine not configured"}
+
+        self._risk_engine.process_context_update(context)
+        snapshot = self._risk_engine.evaluate(time.time())
+        return {
+            "enabled": True,
+            "risk_score": snapshot.risk_score,
+            "risk_level": snapshot.risk_level,
+            "active_rule_ids": snapshot.active_rule_ids,
+        }
+
+    def get_risk_status(self) -> Dict[str, Any]:
+        """Get risk scoring status for R1-R10 engine."""
+        if not self._risk_engine:
+            return {"enabled": False, "message": "Risk scoring engine not configured"}
+        return self._risk_engine.get_status()
+
+    def get_recent_risk_snapshots(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """Get recent risk snapshots for dashboard/troubleshooting."""
+        if not self._risk_engine:
+            return []
+        return self._risk_engine.get_recent_snapshots(limit=limit)
     
     async def _record_violation_event(self, rule: Rule, violation: RuleViolation) -> None:
         """Record violation event in scenario engine for demo UI display."""

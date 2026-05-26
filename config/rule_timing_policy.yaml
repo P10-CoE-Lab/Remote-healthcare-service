@@ -1,0 +1,34 @@
+# config/rule_timing_policy.yaml
+# --------------------------------
+# Unified timing policy table for BOTH engines.
+#
+# All durations/windows are in real seconds.
+#
+# Rules engine:
+#   - Applies value to all conditions[].duration_seconds for a matching rule_id.
+# Risk engine:
+#   - Applies value to evaluation_window_seconds for a matching rule_id.
+
+schema_version: "1.0"
+
+rule_windows_seconds:
+  # Threshold rules (config/rules_config.yaml)
+  heart_rate_elevated: 5
+  temperature_heat_stress: 5
+  posture_unsafe: 5
+  fall_detection: 0
+  spo2_low: 30
+  heart_rate_variability_low: 300
+  fatigue_combination: 5
+
+  # Risk rules (config/risk_rules.yaml)
+  R1: 0
+  R2: 0
+  R3: 10
+  R4: 0
+  R5: 0
+  R6: 60
+  R7: 120
+  R8: 300
+  R9: 30
+  R10: 180

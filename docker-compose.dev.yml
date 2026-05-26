@@ -1,4 +1,4 @@
- # docker-compose.dev.yml
+# docker-compose.dev.yml
 # -------------------------
 # Developer convenience stack for testing the simulator locally.
 # This is NOT the production setup — each POC project has its own compose.

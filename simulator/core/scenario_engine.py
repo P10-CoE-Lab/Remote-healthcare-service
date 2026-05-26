@@ -94,6 +94,8 @@ class ScenarioEngine:
         sim_config:  dict[str, Any],
         mqtt_config: dict[str, Any],
         rules_config_path: Path | str | None = None,
+        risk_config_path: Path | str | None = None,
+        timing_policy_path: Path | str | None = None,
     ) -> None:
         self._sim_config   = sim_config
         self._mqtt_config  = mqtt_config
@@ -110,6 +112,8 @@ class ScenarioEngine:
         self._rules_config: RulesConfig | None = None
         self._rules_engine: RulesEngine | None = None
         self._rules_config_path = rules_config_path or Path("config/rules_config.yaml")
+        self._risk_config_path = risk_config_path or Path("config/risk_rules.yaml")
+        self._timing_policy_path = timing_policy_path or Path("config/rule_timing_policy.yaml")
 
         # Runtime state
         self._running:            bool  = False
@@ -791,6 +795,8 @@ class ScenarioEngine:
                     config=self._rules_config,
                     mqtt_publisher=None,  # Will be set later
                     scenario_engine=self,
+                    risk_config_path=self._risk_config_path,
+                    timing_policy_path=self._timing_policy_path,
                 )
         except Exception as e:
             logger.warning(
@@ -847,3 +853,27 @@ class ScenarioEngine:
             "enabled": True,
             **self._rules_engine.get_status()
         }
+
+    def get_risk_status(self) -> dict[str, Any]:
+        """Get current risk scoring status (R1-R10)."""
+        if not self._rules_engine:
+            return {
+                "enabled": False,
+                "message": "Rules engine not configured"
+            }
+        return self._rules_engine.get_risk_status()
+
+    def get_recent_risk_snapshots(self, limit: int = 20) -> list[dict[str, Any]]:
+        """Get recent risk snapshots for dashboard/troubleshooting."""
+        if not self._rules_engine:
+            return []
+        return self._rules_engine.get_recent_risk_snapshots(limit=limit)
+
+    def update_risk_context(self, context: dict[str, Any]) -> dict[str, Any]:
+        """Update risk context payload (zone/machine/PPE/location/shift)."""
+        if not self._rules_engine:
+            return {
+                "enabled": False,
+                "message": "Rules engine not configured"
+            }
+        return self._rules_engine.update_risk_context(context)

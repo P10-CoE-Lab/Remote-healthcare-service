@@ -109,6 +109,18 @@ async def main() -> None:
         default=None,
         help="Path to rules configuration YAML file (default: config/rules_config.yaml)",
     )
+    parser.add_argument(
+        "--risk-config",
+        type=str,
+        default=None,
+        help="Path to risk scoring configuration YAML file (default: config/risk_rules.yaml)",
+    )
+    parser.add_argument(
+        "--timing-policy",
+        type=str,
+        default=None,
+        help="Path to unified timing policy YAML (default: config/rule_timing_policy.yaml)",
+    )
     args = parser.parse_args()
 
     # Load config files
@@ -118,10 +130,14 @@ async def main() -> None:
 
     # Build engine with optional rules config path
     rules_config_path = args.rules_config or config_dir / "rules_config.yaml"
+    risk_config_path = args.risk_config or config_dir / "risk_rules.yaml"
+    timing_policy_path = args.timing_policy or config_dir / "rule_timing_policy.yaml"
     engine = ScenarioEngine(
         sim_config=sim_config, 
         mqtt_config=mqtt_config,
-        rules_config_path=rules_config_path
+        rules_config_path=rules_config_path,
+        risk_config_path=risk_config_path,
+        timing_policy_path=timing_policy_path,
     )
 
     # Load persona and scenario
