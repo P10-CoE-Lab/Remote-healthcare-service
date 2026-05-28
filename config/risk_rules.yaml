@@ -103,3 +103,43 @@ rules:
       parameters:
         events_threshold: 3
         window_seconds: 180
+
+  # ---------------------------------------------------------------------------
+  # Healthcare rules (H1-H4) — cardiac patient monitoring
+  # ---------------------------------------------------------------------------
+
+  - id: "H1"
+    description: "Critically low blood oxygen (SpO2)"
+    weight: 80
+    evaluation_window_seconds: 0
+    condition:
+      type: "spo2_critically_low"
+      parameters:
+        spo2_threshold: 93
+
+  - id: "H2"
+    description: "Tachycardia — sustained high heart rate"
+    weight: 60
+    evaluation_window_seconds: 30
+    condition:
+      type: "tachycardia"
+      parameters:
+        heart_rate_threshold: 100
+
+  - id: "H3"
+    description: "Bradycardia — dangerously low heart rate"
+    weight: 60
+    evaluation_window_seconds: 30
+    condition:
+      type: "bradycardia"
+      parameters:
+        heart_rate_threshold: 50
+
+  - id: "H4"
+    description: "Critically low HRV — cardiac stress indicator"
+    weight: 40
+    evaluation_window_seconds: 120
+    condition:
+      type: "hrv_critically_low"
+      parameters:
+        hrv_threshold: 20

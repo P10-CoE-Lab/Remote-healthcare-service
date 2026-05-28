@@ -47,6 +47,19 @@ from simulator.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+# Fallback risk weights for threshold-rule violations when real-time risk
+# windows have not matured yet.
+_RULE_RISK_FALLBACK_WEIGHTS: dict[str, int] = {
+    "heart_rate_elevated": 60,          # aligns with H2 tachycardia
+    "temperature_heat_stress": 60,
+    "posture_unsafe": 30,
+    "fall_detection": 80,               # aligns with R5 fall risk
+    "spo2_low": 80,                     # aligns with H1 low SpO2
+    "heart_rate_variability_low": 40,   # aligns with H4 low HRV
+    "fatigue_combination": 25,          # aligns with R7 fatigue risk
+}
+
+
 # ---------------------------------------------------------------------------
 # Rule evaluation state tracking
 # ---------------------------------------------------------------------------
@@ -92,6 +105,8 @@ class RuleViolation:
     triggered_conditions: List[str]
     severity: str
     category: str
+    risk_score: int | None = None
+    risk_level: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -222,6 +237,31 @@ class RulesEngine:
                 rule=rule,
                 condition_states=condition_states,
             )
+
+    def reset_runtime_state(self) -> None:
+        """Clear runtime violation/risk state when loading a new scenario."""
+        self._violation_history.clear()
+        self._alert_cooldowns.clear()
+        self._sensor_data.clear()
+        self._last_evaluation_time = 0.0
+        self._current_persona_id = None
+        self._current_poc_type = None
+        self._current_device_id = None
+
+        for rule_state in self._rule_states.values():
+            rule_state.last_trigger_time = None
+            rule_state.trigger_count = 0
+            rule_state.is_currently_triggered = False
+            for condition_state in rule_state.condition_states.values():
+                condition_state.first_violation_time = None
+                condition_state.last_evaluation_time = 0.0
+                condition_state.is_currently_violated = False
+                condition_state.violation_count = 0
+
+        if self._risk_engine:
+            # Recreate risk engine to reset internal windows/snapshots/events.
+            risk_cfg = self._risk_engine._config
+            self._risk_engine = RiskScoringEngine(risk_cfg)
     
     async def start(self) -> None:
         """Start the rules engine evaluation loop."""
@@ -536,14 +576,31 @@ class RulesEngine:
         rule_state.last_trigger_time = current_time
         rule_state.trigger_count += 1
         self._alert_cooldowns[rule.id] = current_time
+
+        risk_score: int | None = None
+        risk_level: str | None = None
         
         # Create violation record
-        violation = self._create_violation_record(rule_state, current_time)
-        self._violation_history.append(violation)
-
         # Feed rule trigger into risk engine for R10 counting
         if self._risk_engine:
             self._risk_engine.process_safety_event(f"rule_violation:{rule.id}")
+            risk_snapshot = self._risk_engine.evaluate(current_time)
+            risk_score = risk_snapshot.risk_score
+            risk_level = risk_snapshot.risk_level
+
+        # Violations should always carry meaningful risk. If windowed risk rules
+        # have not matured yet (score=0), assign a deterministic fallback weight.
+        if not risk_score or risk_score <= 0:
+            risk_score = self._fallback_risk_score(rule)
+            risk_level = self._risk_level_for_score(risk_score)
+
+        violation = self._create_violation_record(
+            rule_state,
+            current_time,
+            risk_score=risk_score,
+            risk_level=risk_level,
+        )
+        self._violation_history.append(violation)
         
         # Execute actions
         for action in rule.actions:
@@ -572,10 +629,58 @@ class RulesEngine:
                 "severity": rule.severity,
                 "persona_id": self._current_persona_id,
                 "trigger_count": rule_state.trigger_count,
+                "risk_score": risk_score,
+                "risk_level": risk_level,
             }
         )
+
+    def _fallback_risk_score(self, rule: Rule) -> int:
+        """Return a non-zero fallback score for a triggered threshold rule."""
+        score = _RULE_RISK_FALLBACK_WEIGHTS.get(rule.id)
+        if score is not None:
+            return score
+
+        # Severity-based fallback for any unmapped custom rule IDs.
+        severity_scores = {
+            "info": 10,
+            "warning": 30,
+            "critical": 60,
+            "emergency": 80,
+        }
+        return severity_scores.get(rule.severity, 10)
+
+    def _risk_level_for_score(self, score: int) -> str:
+        """Map a numeric score to risk level using configured thresholds."""
+        if self._risk_engine:
+            thresholds = self._risk_engine._config.level_thresholds
+            if score >= thresholds.critical:
+                return "critical"
+            if score >= thresholds.high:
+                return "high"
+            if score >= thresholds.medium:
+                return "medium"
+            if score >= thresholds.low:
+                return "low"
+            return "none"
+
+        # Default threshold mapping when risk engine is unavailable.
+        if score >= 80:
+            return "critical"
+        if score >= 60:
+            return "high"
+        if score >= 30:
+            return "medium"
+        if score >= 10:
+            return "low"
+        return "none"
     
-    def _create_violation_record(self, rule_state: RuleState, current_time: float) -> RuleViolation:
+    def _create_violation_record(
+        self,
+        rule_state: RuleState,
+        current_time: float,
+        risk_score: int | None = None,
+        risk_level: str | None = None,
+    ) -> RuleViolation:
         """Create a violation record for the triggered rule."""
         rule = rule_state.rule
         
@@ -608,6 +713,8 @@ class RulesEngine:
             triggered_conditions=triggered_conditions,
             severity=rule.severity,
             category=rule.category,
+            risk_score=risk_score,
+            risk_level=risk_level,
         )
     
     async def _execute_action(self, action: RuleAction, rule: Rule, violation: RuleViolation) -> None:
@@ -678,6 +785,8 @@ class RulesEngine:
                 "persona_id": violation.persona_id,
                 "poc_type": violation.poc_type,
                 "triggered_conditions": violation.triggered_conditions,
+                "risk_score": violation.risk_score,
+                "risk_level": violation.risk_level,
             }
             
             if self._config.alert_config.include_sensor_context:
@@ -762,6 +871,8 @@ class RulesEngine:
             "timestamp": datetime.fromtimestamp(violation.timestamp, tz=timezone.utc).isoformat(),
             "severity": rule.severity,
             "category": rule.category,
+            "risk_score": violation.risk_score if violation.risk_score is not None else "n/a",
+            "risk_level": violation.risk_level if violation.risk_level is not None else "none",
         }
         
         # Add sensor values
@@ -839,6 +950,8 @@ class RulesEngine:
                 "category": v.category,
                 "triggered_conditions": v.triggered_conditions,
                 "sensor_readings": v.sensor_readings,
+                "risk_score": v.risk_score,
+                "risk_level": v.risk_level,
             }
             for v in recent
         ]
@@ -901,6 +1014,12 @@ class RulesEngine:
             return {"enabled": False, "message": "Risk scoring engine not configured"}
         return self._risk_engine.get_status()
 
+    def get_configured_risk_rules(self) -> List[Dict[str, Any]]:
+        """Get all configured risk rules with their metadata."""
+        if not self._risk_engine:
+            return []
+        return self._risk_engine.get_configured_risk_rules()
+
     def get_recent_risk_snapshots(self, limit: int = 20) -> List[Dict[str, Any]]:
         """Get recent risk snapshots for dashboard/troubleshooting."""
         if not self._risk_engine:
@@ -941,6 +1060,8 @@ class RulesEngine:
                     "rule_name": rule.name,
                     "severity": rule.severity,
                     "conditions": violation.triggered_conditions,
-                    "timestamp": violation.timestamp
+                    "timestamp": violation.timestamp,
+                    "risk_score": violation.risk_score,
+                    "risk_level": violation.risk_level,
                 }
                 self._scenario_engine._demo_event_log.append(event_details)

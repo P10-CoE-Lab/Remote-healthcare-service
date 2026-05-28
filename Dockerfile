@@ -13,4 +13,4 @@ COPY . .
 EXPOSE 8000
 
 # Default command for testing - runs with demo UI and rules engine enabled
-CMD ["python", "run.py", "--persona", "personas/cardiac_patient.yaml", "--scenario", "scenarios/health/tachycardia_episode.yaml", "--compression", "60", "--demo", "--rules", "config/rules_config.yaml"]
+CMD ["python", "run.py", "--persona", "personas/cardiac_patient.yaml", "--scenario", "scenarios/health/tachycardia_episode.yaml", "--compression", "60", "--demo", "--rules-config", "config/rules_config.yaml"]

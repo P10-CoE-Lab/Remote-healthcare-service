@@ -151,14 +151,57 @@
     /* ── Violations list ── */
     .violation-item { padding: 10px 0; border-bottom: 1px solid #1a2030; flex-shrink: 0; }
     .violation-item:last-child { border-bottom: none; }
-    .violation-rule { font-size: 13px; font-weight: 600; color: #f87171; margin-bottom: 2px; }
+    .violation-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 3px; gap: 8px; }
+    .violation-rule { font-size: 13px; font-weight: 600; color: #f87171; }
     .violation-detail { font-size: 12px; color: #64748b; font-family: "JetBrains Mono", "Fira Code", monospace; }
     .violation-list { flex: 1; overflow-y: auto; min-height: 0; }
+    .risk-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; white-space: nowrap; flex-shrink: 0; }
+    .risk-none     { background: #1e293b; color: #64748b; }
+    .risk-low      { background: #0c2a1a; color: #4ade80; }
+    .risk-medium   { background: #422006; color: #fbbf24; }
+    .risk-high     { background: #431407; color: #fb923c; }
+    .risk-critical { background: #450a0a; color: #f87171; }
 
     /* ── Severity badges ── */
     .sev-critical { background: #450a0a; color: #f87171; }
     .sev-warning  { background: #422006; color: #fbbf24; }
     .sev-info     { background: #0c1a2e; color: #60a5fa; }
+
+    /* ── Risk Assessment tab ── */
+    .risk-display { display: flex; flex-direction: column; gap: 14px; flex: 1; min-height: 0; }
+    .risk-score-card { background: #1e2430; border: 1px solid #2d3748; border-radius: 14px;
+                       padding: 26px; display: flex; flex-direction: column; gap: 20px; flex-shrink: 0; }
+    .risk-score-big { display: flex; align-items: baseline; gap: 12px; }
+    .risk-score-num { font-size: 56px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .risk-score-num.none     { color: #64748b; }
+    .risk-score-num.low      { color: #4ade80; }
+    .risk-score-num.medium   { color: #fbbf24; }
+    .risk-score-num.high     { color: #fb923c; }
+    .risk-score-num.critical { color: #f87171; }
+    .risk-level-label { font-size: 18px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+    .risk-level-label.none     { color: #64748b; }
+    .risk-level-label.low      { color: #4ade80; }
+    .risk-level-label.medium   { color: #fbbf24; }
+    .risk-level-label.high     { color: #fb923c; }
+    .risk-level-label.critical { color: #f87171; }
+
+    .risk-details { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; flex: 1; min-height: 0; }
+    .risk-active-rules { background: #1e2430; border: 1px solid #2d3748; border-radius: 14px;
+                         padding: 22px 26px; display: flex; flex-direction: column; min-height: 0; }
+    .risk-params { background: #1e2430; border: 1px solid #2d3748; border-radius: 14px;
+                   padding: 22px 26px; display: flex; flex-direction: column; min-height: 0; }
+    .risk-rules-title, .risk-params-title { font-size: 12px; font-weight: 700; text-transform: uppercase;
+                                            letter-spacing: 0.1em; color: #475569; margin-bottom: 14px; flex-shrink: 0; }
+    .risk-rules-list, .risk-params-list { flex: 1; overflow-y: auto; min-height: 0; }
+    .risk-rule-row { padding: 10px 0; border-bottom: 1px solid #1a2030; flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .risk-rule-row:last-child { border-bottom: none; }
+    .risk-rule-name { font-size: 13px; font-weight: 600; color: #e2e8f0; flex: 1; }
+    .risk-rule-weight { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; padding: 4px 8px; border-radius: 4px; background: #0a0d13; color: #fbbf24; }
+    .risk-param-row { padding: 8px 0; border-bottom: 1px solid #1a2030; flex-shrink: 0; }
+    .risk-param-row:last-child { border-bottom: none; }
+    .risk-param-label { font-size: 12px; color: #94a3b8; margin-bottom: 2px; }
+    .risk-param-value { font-size: 13px; font-weight: 600; color: #e2e8f0; font-family: "JetBrains Mono", "Fira Code", monospace; }
+    .risk-empty { color: #475569; font-size: 14px; padding: 8px 0; }
   </style>
 </head>
 <body>
@@ -171,6 +214,7 @@
 <div class="tabs">
   <button class="tab-btn active" data-tab="simulator">Simulator</button>
   <button class="tab-btn" data-tab="rules">Rules</button>
+  <button class="tab-btn" data-tab="risk">Risk Assessment</button>
 </div>
 
 <div class="tab-panel active" id="tab-simulator">
@@ -283,6 +327,38 @@
   </div>
 </div><!-- end #tab-rules -->
 
+<div class="tab-panel" id="tab-risk">
+  <div class="risk-display">
+    <!-- Risk Score Card -->
+    <div class="risk-score-card">
+      <div class="risk-score-big">
+        <div class="risk-score-num none" id="risk-score-display">0</div>
+        <div class="risk-level-label none" id="risk-level-display">NONE</div>
+      </div>
+      <div style="font-size:14px;color:#94a3b8">Current Risk Assessment</div>
+    </div>
+
+    <!-- Active Rules & Parameters -->
+    <div class="risk-details">
+      <!-- Active Risk Rules -->
+      <div class="risk-active-rules">
+        <div class="risk-rules-title">Active Risk Rules</div>
+        <div class="risk-rules-list" id="risk-active-rules-list">
+          <p class="risk-empty">No active risk rules</p>
+        </div>
+      </div>
+
+      <!-- Risk Parameters -->
+      <div class="risk-params">
+        <div class="risk-params-title">Contributing Factors</div>
+        <div class="risk-params-list" id="risk-params-list">
+          <p class="risk-empty">Loading parameters...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div><!-- end #tab-risk -->
+
 <script>
   const API = '';
   let pollInterval = null;
@@ -381,7 +457,10 @@
       if (r.ok) {
         log(d.message || ('Scenario loaded: ' + scenario));
         _lastEventSig = '';
+        _lastEventCount = 0;
         await fetchStatus();
+        await fetchRecentEvents();
+        await fetchViolations();
       } else {
         log('Error ' + r.status + ': ' + detailMsg(d.detail), 'error');
       }
@@ -571,11 +650,148 @@
       }
       el.innerHTML = violations.slice().reverse().map(v => {
         const ts = v.timestamp ? new Date(v.timestamp * 1000).toTimeString().slice(0, 8) : '';
+        const riskScore = v.display_risk_score != null ? v.display_risk_score : (v.risk_score != null ? v.risk_score : null);
+        const riskLevel = (v.display_risk_level || v.risk_level || 'none').toLowerCase();
+        const riskBadge = riskScore != null
+          ? `<span class="risk-badge risk-${riskLevel}" title="Risk level: ${riskLevel}">Risk ${riskScore}</span>`
+          : '';
+        const sevCls = v.severity === 'critical' || v.severity === 'emergency' ? 'sev-critical'
+                     : v.severity === 'warning' ? 'sev-warning' : 'sev-info';
+        const sevBadge = v.severity
+          ? `<span class="badge ${sevCls}" style="font-size:11px;padding:2px 6px">${v.severity}</span>`
+          : '';
+        const conditions = (v.triggered_conditions || []).join(', ');
         return `<div class="violation-item">
-          <div class="violation-rule">&#9888; ${v.rule_name || v.rule_id || 'Unknown rule'}</div>
-          <div class="violation-detail">${ts ? ts + ' &mdash; ' : ''}${v.message || JSON.stringify(v)}</div>
+          <div class="violation-header">
+            <span class="violation-rule">&#9888; ${v.rule_name || v.rule_id || 'Unknown rule'}</span>
+            <span style="display:flex;gap:4px;align-items:center;flex-shrink:0">${sevBadge}${riskBadge}</span>
+          </div>
+          <div class="violation-detail">${ts || ''}${conditions ? ' &mdash; ' + conditions : ''}</div>
         </div>`;
       }).join('');
+    } catch (e) { /* silently fail */ }
+  }
+
+  let _lastRiskSig = '';
+
+  async function fetchRiskAssessment() {
+    try {
+      const riskResp = await fetch(API + '/risk/status');
+      if (!riskResp.ok) return;
+      const riskData = await riskResp.json();
+
+      const rulesResp = await fetch(API + '/rules/status');
+      if (!rulesResp.ok) return;
+      const rulesData = await rulesResp.json();
+
+      // Build risk rules map for quick lookup
+      const riskRulesMap = {};
+      (rulesData.risk_rules || []).forEach(rule => {
+        riskRulesMap[rule.id] = rule;
+      });
+
+      // Check if data changed
+      const sig = JSON.stringify({
+        score: riskData.risk_score,
+        activeRuleIds: riskData.active_rule_ids
+      });
+      if (sig === _lastRiskSig) return;
+      _lastRiskSig = sig;
+
+      // Update risk score display
+      const score = riskData.risk_score || 0;
+      const level = (riskData.risk_level || 'none').toLowerCase();
+      document.getElementById('risk-score-display').textContent = score;
+      document.getElementById('risk-score-display').className = `risk-score-num ${level}`;
+      document.getElementById('risk-level-display').textContent = (riskData.risk_level || 'NONE').toUpperCase();
+      document.getElementById('risk-level-display').className = `risk-level-label ${level}`;
+
+      // Update active risk rules
+      const activeRuleIds = riskData.active_rule_ids || [];
+      const rulesList = document.getElementById('risk-active-rules-list');
+      if (!activeRuleIds.length) {
+        rulesList.innerHTML = '<p class="risk-empty">No active risk rules</p>';
+      } else {
+        rulesList.innerHTML = activeRuleIds.map(ruleId => {
+          const rule = riskRulesMap[ruleId];
+          const weight = rule && rule.weight ? rule.weight : 0;
+          const name = rule && rule.name ? rule.name : ruleId;
+          return `<div class="risk-rule-row">
+            <span class="risk-rule-name">${name}</span>
+            <span class="risk-rule-weight">+${weight}</span>
+          </div>`;
+        }).join('');
+      }
+
+      // Update risk parameters - show sensor values and thresholds for active rules
+      const paramsList = document.getElementById('risk-params-list');
+      const params = new Map(); // Use map to avoid duplicates
+      
+      // Collect current sensor values from risk data if available
+      const currentValues = riskData.current_sensor_values || {};
+
+      // For each active rule, show its contributing parameters
+      activeRuleIds.forEach(ruleId => {
+        const rule = riskRulesMap[ruleId];
+        if (!rule) return;
+
+        if (ruleId.startsWith('H')) {
+          // Healthcare rules
+          if (ruleId === 'H1' && rule.condition_params) {
+            const p = rule.condition_params;
+            params.set('spo2_threshold', {
+              label: 'SpO₂ Critical Threshold',
+              value: `${p.spo2_threshold || 93}%`,
+              current: currentValues.spo2 ? `Current: ${currentValues.spo2.toFixed(1)}%` : ''
+            });
+          } else if (ruleId === 'H2' && rule.condition_params) {
+            const p = rule.condition_params;
+            params.set('hr_high_threshold', {
+              label: 'Heart Rate Elevated Threshold',
+              value: `> ${p.heart_rate_threshold || 100} bpm`,
+              current: currentValues.heart_rate ? `Current: ${currentValues.heart_rate.toFixed(0)} bpm` : ''
+            });
+          } else if (ruleId === 'H3' && rule.condition_params) {
+            const p = rule.condition_params;
+            params.set('hr_low_threshold', {
+              label: 'Heart Rate Low Threshold',
+              value: `< ${p.heart_rate_threshold || 50} bpm`,
+              current: currentValues.heart_rate ? `Current: ${currentValues.heart_rate.toFixed(0)} bpm` : ''
+            });
+          } else if (ruleId === 'H4' && rule.condition_params) {
+            const p = rule.condition_params;
+            params.set('hrv_threshold', {
+              label: 'HRV Critical Threshold',
+              value: `< ${p.hrv_threshold || 20} ms`,
+              current: currentValues.hrv ? `Current: ${currentValues.hrv.toFixed(1)} ms` : ''
+            });
+          }
+        } else if (ruleId.startsWith('R')) {
+          // Worker safety rules - similar logic
+          if (rule.condition_params) {
+            const p = rule.condition_params;
+            if (ruleId === 'R1' || ruleId === 'R2') {
+              params.set(`${ruleId}_strain`, {
+                label: rule.name || `Rule ${ruleId}`,
+                value: p.strain_threshold ? `Strain > ${p.strain_threshold}` : 'Strain elevated',
+                current: currentValues.strain ? `Current: ${currentValues.strain.toFixed(1)}` : ''
+              });
+            }
+          }
+        }
+      });
+
+      if (params.size === 0) {
+        paramsList.innerHTML = '<p class="risk-empty">No contributing factors</p>';
+      } else {
+        paramsList.innerHTML = Array.from(params.values()).map(p => `
+          <div class="risk-param-row">
+            <div class="risk-param-label">${p.label}</div>
+            <div class="risk-param-value">${p.value}</div>
+            ${p.current ? `<div class="risk-param-label" style="margin-top:2px">${p.current}</div>` : ''}
+          </div>
+        `).join('');
+      }
     } catch (e) { /* silently fail */ }
   }
 
@@ -584,11 +800,13 @@
   fetchRecentEvents();
   fetchRules();
   fetchViolations();
+  fetchRiskAssessment();
   pollInterval = setInterval(() => {
     fetchStatus();
     fetchRecentEvents();
     fetchRules();
     fetchViolations();
+    fetchRiskAssessment();
   }, 2000);
 </script>
 

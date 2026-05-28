@@ -169,6 +169,21 @@ def create_app(engine) -> FastAPI:
         try:
             status = _engine.get_status()
             events_fired = status.events_fired or []
+            rules_engine = getattr(_engine, "_rules_engine", None)
+            current_risk_score = None
+            current_risk_level = None
+            if rules_engine:
+                risk_state = rules_engine.get_status().get("risk", {})
+                current_risk_score = risk_state.get("risk_score")
+                current_risk_level = risk_state.get("risk_level")
+
+            # Build a lookup so we can attach risk score per rule violation event.
+            violations_by_rule: dict[str, list[dict[str, Any]]] = {}
+            if rules_engine:
+                for violation in rules_engine.get_recent_violations(limit=200):
+                    violations_by_rule.setdefault(violation["rule_id"], []).append(violation)
+
+            rule_violation_index: dict[str, int] = {}
             
             # Add descriptions for events
             event_details = []
@@ -177,10 +192,28 @@ def create_app(engine) -> FastAPI:
                     # Get rule details for violations
                     rule_id = event_name.replace("rule_violation_", "")
                     rule_name = rule_id.replace("_", " ").title()
+                    idx = rule_violation_index.get(rule_id, 0)
+                    history = violations_by_rule.get(rule_id, [])
+                    violation = history[idx] if idx < len(history) else (history[-1] if history else None)
+                    rule_violation_index[rule_id] = idx + 1
+
+                    risk_score = violation.get("risk_score") if violation else None
+                    display_risk_score = risk_score
+                    if (display_risk_score is None or display_risk_score == 0) and current_risk_score is not None:
+                        display_risk_score = current_risk_score
+                    display_risk_level = violation.get("risk_level") if violation else None
+                    if (display_risk_level is None or display_risk_level == "none") and current_risk_level is not None:
+                        display_risk_level = current_risk_level
+
+                    risk_suffix = f" (Risk Score: {display_risk_score})" if display_risk_score is not None else ""
+
                     event_details.append({
                         "type": event_name,
-                        "description": f"Rule Violation: {rule_name}",
-                        "category": "violation"
+                        "description": f"Rule Violation: {rule_name}{risk_suffix}",
+                        "category": "violation",
+                        "risk_score": risk_score,
+                        "display_risk_score": display_risk_score,
+                        "risk_level": display_risk_level,
                     })
                 else:
                     # Regular scenario events  
@@ -204,7 +237,26 @@ def create_app(engine) -> FastAPI:
                 return {"violations": [], "message": "Rules engine not enabled"}
             
             violations = rules_engine.get_recent_violations(limit=20)
-            return {"violations": violations}
+            risk_state = rules_engine.get_status().get("risk", {})
+            current_risk_score = risk_state.get("risk_score")
+            current_risk_level = risk_state.get("risk_level")
+
+            enriched_violations = []
+            for violation in violations:
+                item = dict(violation)
+                item["display_risk_score"] = item.get("risk_score")
+                item["display_risk_level"] = item.get("risk_level")
+
+                if (item.get("display_risk_score") is None or item.get("display_risk_score") == 0) and current_risk_score is not None:
+                    item["display_risk_score"] = current_risk_score
+                if (item.get("display_risk_level") is None or item.get("display_risk_level") == "none") and current_risk_level is not None:
+                    item["display_risk_level"] = current_risk_level
+
+                item["current_risk_score"] = current_risk_score
+                item["current_risk_level"] = current_risk_level
+                enriched_violations.append(item)
+
+            return {"violations": enriched_violations}
         except Exception as exc:
             logger.error("Rules violations endpoint error", extra={"event": "api_error", "error": str(exc)})
             raise HTTPException(status_code=500, detail="Failed to get rule violations")
@@ -215,17 +267,50 @@ def create_app(engine) -> FastAPI:
         try:
             status = _engine.get_status()
             events = []
+            rules_engine = getattr(_engine, "_rules_engine", None)
+            current_risk_score = None
+            current_risk_level = None
+            if rules_engine:
+                risk_state = rules_engine.get_status().get("risk", {})
+                current_risk_score = risk_state.get("risk_score")
+                current_risk_level = risk_state.get("risk_level")
+
+            violations_by_rule: dict[str, list[dict[str, Any]]] = {}
+            if rules_engine:
+                for violation in rules_engine.get_recent_violations(limit=200):
+                    violations_by_rule.setdefault(violation["rule_id"], []).append(violation)
+
+            rule_violation_index: dict[str, int] = {}
             
             # Add regular scenario events
             for event in status.events_fired[-10:]:  # Last 10 events
                 if event.startswith("rule_violation_"):
                     # This is a violation event
                     rule_id = event.replace("rule_violation_", "")
+                    idx = rule_violation_index.get(rule_id, 0)
+                    history = violations_by_rule.get(rule_id, [])
+                    violation = history[idx] if idx < len(history) else (history[-1] if history else None)
+                    rule_violation_index[rule_id] = idx + 1
+
+                    risk_score = violation.get("risk_score") if violation else None
+                    display_risk_score = risk_score
+                    if (display_risk_score is None or display_risk_score == 0) and current_risk_score is not None:
+                        display_risk_score = current_risk_score
+
+                    display_risk_level = violation.get("risk_level") if violation else None
+                    if (display_risk_level is None or display_risk_level == "none") and current_risk_level is not None:
+                        display_risk_level = current_risk_level
+
+                    risk_suffix = f" (Risk Score: {display_risk_score})" if display_risk_score is not None else ""
+
                     events.append({
                         "type": "violation", 
                         "name": event,
-                        "description": f"Rule violation: {rule_id}",
-                        "timestamp": time.time()
+                        "description": f"Rule violation: {rule_id}{risk_suffix}",
+                        "timestamp": time.time(),
+                        "risk_score": risk_score,
+                        "display_risk_score": display_risk_score,
+                        "risk_level": display_risk_level,
                     })
                 else:
                     # Regular scenario event

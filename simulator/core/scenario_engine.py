@@ -206,6 +206,8 @@ class ScenarioEngine:
 
         # Load rules configuration
         self._load_rules_config()
+        if self._rules_engine:
+            self._rules_engine.reset_runtime_state()
 
         # Reset state
         self._fault_ctrl  = FaultController()
@@ -849,10 +851,12 @@ class ScenarioEngine:
                 "message": "Rules engine not configured"
             }
         
-        return {
+        status = {
             "enabled": True,
-            **self._rules_engine.get_status()
+            **self._rules_engine.get_status(),
+            "risk_rules": self._rules_engine.get_configured_risk_rules(),
         }
+        return status
 
     def get_risk_status(self) -> dict[str, Any]:
         """Get current risk scoring status (R1-R10)."""
@@ -862,6 +866,12 @@ class ScenarioEngine:
                 "message": "Rules engine not configured"
             }
         return self._rules_engine.get_risk_status()
+
+    def get_configured_risk_rules(self) -> list[dict[str, Any]]:
+        """Get all configured risk rules with their metadata."""
+        if not self._rules_engine:
+            return []
+        return self._rules_engine.get_configured_risk_rules()
 
     def get_recent_risk_snapshots(self, limit: int = 20) -> list[dict[str, Any]]:
         """Get recent risk snapshots for dashboard/troubleshooting."""

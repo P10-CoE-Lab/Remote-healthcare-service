@@ -89,11 +89,11 @@ events:
     description: "Sudden tachycardia episode begins"
     overrides:
       heart_rate: 138
-    duration_seconds: 20
+    duration_seconds: 45
 
   - at_minute: 22
     type: low_spo2
     description: "Oxygen drops during peak tachycardia"
     overrides:
-      spo2: 91
+      spo2: 88
     duration_seconds: 60

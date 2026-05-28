@@ -120,6 +120,21 @@ class RiskScoringEngine:
             "last_evaluated_at": latest.timestamp,
         }
 
+    def get_configured_risk_rules(self) -> List[Dict[str, Any]]:
+        """Return all configured risk rules with their metadata."""
+        rules = []
+        for rule in sorted(self._config.rules, key=lambda r: r.id):
+            rules.append({
+                "id": rule.id,
+                "name": rule.description,
+                "weight": rule.weight,
+                "enabled": rule.enabled,
+                "evaluation_window_seconds": rule.evaluation_window_seconds,
+                "condition_type": rule.condition_type,
+                "condition_params": rule.parameters,
+            })
+        return rules
+
     def get_recent_snapshots(self, limit: int = 20) -> List[Dict[str, Any]]:
         """Get recent risk snapshots for debugging/dashboard."""
         recent = list(self._recent_snapshots)[-limit:]
@@ -221,6 +236,30 @@ class RiskScoringEngine:
             while self._recent_safety_events and self._recent_safety_events[0][0] < cutoff:
                 self._recent_safety_events.popleft()
             return len(self._recent_safety_events) >= threshold
+
+        # ---------------------------------------------------------------------------
+        # Healthcare conditions (H1-H4)
+        # ---------------------------------------------------------------------------
+
+        if ctype == "spo2_critically_low":
+            spo2 = self._latest_sensor_values.get("spo2")
+            threshold = float(rule.parameters.get("spo2_threshold", 93))
+            return self._is_number(spo2) and float(spo2) < threshold
+
+        if ctype == "tachycardia":
+            hr = self._latest_sensor_values.get("heart_rate")
+            threshold = float(rule.parameters.get("heart_rate_threshold", 100))
+            return self._is_number(hr) and float(hr) > threshold
+
+        if ctype == "bradycardia":
+            hr = self._latest_sensor_values.get("heart_rate")
+            threshold = float(rule.parameters.get("heart_rate_threshold", 50))
+            return self._is_number(hr) and float(hr) < threshold
+
+        if ctype == "hrv_critically_low":
+            hrv = self._latest_sensor_values.get("heart_rate_variability")
+            threshold = float(rule.parameters.get("hrv_threshold", 20))
+            return self._is_number(hrv) and float(hrv) < threshold
 
         return False
 

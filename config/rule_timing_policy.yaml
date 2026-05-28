@@ -32,3 +32,10 @@ rule_windows_seconds:
   R8: 300
   R9: 30
   R10: 180
+
+  # Healthcare risk rules (config/risk_rules.yaml)
+  # Keep sustained windows to reduce false positives from short sensor artifacts.
+  H1: 30
+  H2: 30
+  H3: 30
+  H4: 120
