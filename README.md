@@ -76,6 +76,22 @@ python run.py \
   --scenario scenarios/health/tachycardia_episode.yaml \
   --compression 10 \
   --demo
+
+# Batch mode — run all persona/scenario entries from one file (sequentially)
+python run.py \
+  --run-matrix config/run_matrix.yaml \
+  --compression 60
+
+# Single-file demo mode — uses runtime.demo_api_port and runtime.default_demo
+# from config/run_matrix.yaml
+python run.py \
+  --run-matrix config/run_matrix.yaml \
+  --demo
+
+# Incident audit mode — check each scenario event against thresholds
+# and generate one consolidated above/below report file
+python run.py \
+  --incident-threshold-check
 ```
 
 | Service | URL | Credentials |

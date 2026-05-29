@@ -202,6 +202,28 @@
     .risk-param-label { font-size: 12px; color: #94a3b8; margin-bottom: 2px; }
     .risk-param-value { font-size: 13px; font-weight: 600; color: #e2e8f0; font-family: "JetBrains Mono", "Fira Code", monospace; }
     .risk-empty { color: #475569; font-size: 14px; padding: 8px 0; }
+    /* ── Scenario content ── */
+    .scenario-desc { font-size: 12px; color: #64748b; margin-bottom: 10px;
+                     padding-bottom: 10px; border-bottom: 1px solid #1a2030; flex-shrink: 0; }
+    .phase-item { padding: 10px 0; border-bottom: 1px solid #1a2030; flex-shrink: 0; }
+    .phase-item:last-child { border-bottom: none; }
+    .phase-header { display: flex; justify-content: space-between; align-items: baseline;
+                    margin-bottom: 5px; }
+    .phase-name { font-size: 13px; font-weight: 700; color: #e2e8f0;
+                  text-transform: capitalize; }
+    .phase-time { font-size: 11px; color: #475569; white-space: nowrap; }
+    .sensor-row { display: flex; justify-content: space-between; font-size: 12px;
+                  padding: 2px 0 2px 10px; }
+    .sensor-key { color: #60a5fa; font-weight: 600; text-transform: capitalize; }
+    .sensor-val { color: #cbd5e1; font-family: "JetBrains Mono", "Fira Code", monospace;
+                  font-size: 11px; text-align: right; }
+    .sensor-beh { color: #475569; }
+    .scenario-event-item { display: flex; gap: 10px; padding: 4px 0;
+                           font-size: 12px; border-bottom: 1px solid #111827; }
+    .scenario-event-item:last-child { border-bottom: none; }
+    .scenario-event-time { color: #fbbf24; font-family: "JetBrains Mono", monospace;
+                           flex-shrink: 0; }
+    .scenario-event-desc { color: #94a3b8; }
   </style>
 </head>
 <body>
@@ -308,11 +330,11 @@
 <div class="tab-panel" id="tab-rules">
   <div class="rules-grid">
 
-    <!-- Active Rules card -->
+    <!-- Active Scenario card -->
     <div class="card">
-      <div class="card-title">Active Rules</div>
+      <div class="card-title">Active Scenario</div>
       <div class="rule-list" id="rules-list">
-        <p style="color:#475569;font-size:14px">Loading rules&hellip;</p>
+        <p style="color:#475569;font-size:14px">No scenario loaded.</p>
       </div>
     </div>
 
@@ -365,7 +387,7 @@
   let _lastEventSig = '';
   let _lastEventCount = 0;
   let _lastEventLogSig = '';
-  let _lastRulesSig = '';
+  let _lastScenarioSig = '';
   let _lastViolationCount = 0;
 
   // ── Tab switching ──
@@ -599,38 +621,70 @@
     if (e.key === 'Enter') triggerCustom();
   });
 
-  async function fetchRules() {
+  async function fetchScenarioContent() {
     try {
-      const r = await fetch(API + '/rules/status');
+      const r = await fetch(API + '/scenario/content');
       if (!r.ok) return;
       const data = await r.json();
-      const rules = data.rules || [];
-      const sig = JSON.stringify(rules.map(r => r.id + r.enabled));
-      if (sig === _lastRulesSig) return;
-      _lastRulesSig = sig;
+
+      const sig = data.scenario_id + JSON.stringify(data.phases);
+      if (sig === _lastScenarioSig) return;
+      _lastScenarioSig = sig;
 
       const el = document.getElementById('rules-list');
-      if (!rules.length) {
-        el.innerHTML = '<p style="color:#475569;font-size:14px">No rules configured.</p>';
+      if (!data.loaded) {
+        el.innerHTML = '<p style="color:#475569;font-size:14px">No scenario loaded.</p>';
         return;
       }
-      el.innerHTML = rules.map(rule => {
-        const sevCls = rule.severity === 'critical' ? 'sev-critical'
-                     : rule.severity === 'warning'  ? 'sev-warning' : 'sev-info';
-        const enabledBadge = rule.enabled
-          ? '<span class="badge badge-green" style="font-size:11px;padding:2px 8px">ON</span>'
-          : '<span class="badge badge-gray"  style="font-size:11px;padding:2px 8px">OFF</span>';
-        return `<div class="rule-item">
-          <div class="rule-header">
-            <span class="rule-name">${rule.name || rule.id}</span>
-            <span style="display:flex;gap:6px;align-items:center">
-              <span class="badge ${sevCls}" style="font-size:11px;padding:2px 8px">${rule.severity || 'info'}</span>
-              ${enabledBadge}
+
+      let html = `<div class="scenario-desc">
+        <strong style="color:#e2e8f0">${data.scenario_id}</strong>
+        &nbsp;&mdash;&nbsp;${data.description || ''}
+        &nbsp;|&nbsp;${data.total_duration_minutes} min
+      </div>`;
+
+      html += (data.phases || []).map(ph => {
+        const noiseCls = ph.noise_intensity === 'high'   ? '#f87171'
+                       : ph.noise_intensity === 'medium' ? '#fbbf24' : '#4ade80';
+        const sensorRows = Object.entries(ph.sensors).map(([name, cfg]) => {
+          const label = name.replace(/_/g, '\u00a0');
+          const beh   = cfg.behavior.replace(/_/g, '\u00a0');
+          return `<div class="sensor-row">
+            <span class="sensor-key">${label}</span>
+            <span class="sensor-val">${cfg.min}&ndash;${cfg.max}
+              &nbsp;<span class="sensor-beh">${beh}</span>
+            </span>
+          </div>`;
+        }).join('');
+
+        const activity = ph.activity ? `&nbsp;&bull;&nbsp;${ph.activity}` : '';
+        return `<div class="phase-item">
+          <div class="phase-header">
+            <span class="phase-name">${ph.name.replace(/_/g, ' ')}</span>
+            <span class="phase-time">${ph.start_minute}&ndash;${ph.end_minute}\u00a0min
+              &nbsp;<span style="color:${noiseCls}">${ph.noise_intensity}</span>${activity}
             </span>
           </div>
-          <div class="rule-desc">${rule.description || ''}</div>
+          ${sensorRows}
         </div>`;
       }).join('');
+
+      if (data.events && data.events.length) {
+        const evRows = data.events.map(ev =>
+          `<div class="scenario-event-item">
+            <span class="scenario-event-time">@${ev.at_minute}m</span>
+            <span class="scenario-event-desc">${ev.description || ev.event_type}</span>
+          </div>`
+        ).join('');
+        html += `<div class="phase-item">
+          <div class="phase-header">
+            <span class="phase-name" style="color:#fbbf24">Scripted Events</span>
+          </div>
+          ${evRows}
+        </div>`;
+      }
+
+      el.innerHTML = html;
     } catch (e) { /* silently fail */ }
   }
 
@@ -798,13 +852,13 @@
   loadLists();
   fetchStatus();
   fetchRecentEvents();
-  fetchRules();
+  fetchScenarioContent();
   fetchViolations();
   fetchRiskAssessment();
   pollInterval = setInterval(() => {
     fetchStatus();
     fetchRecentEvents();
-    fetchRules();
+    fetchScenarioContent();
     fetchViolations();
     fetchRiskAssessment();
   }, 2000);

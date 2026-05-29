@@ -1,0 +1,22 @@
+schema_version: "1.0"
+description: "All persona/scenario combinations for sequential batch execution"
+
+runtime:
+  demo_api_port: 8000
+  default_demo:
+    persona: "personas/welder_factory.yaml"
+    scenario: "scenarios/worker/fatigue_escalation.yaml"
+    reason: "Shows progressive threshold crossing and incident triggers in one continuous storyline for demo."
+
+runs:
+  - persona: "personas/welder_factory.yaml"
+    scenarios:
+      - "scenarios/worker/normal_shift.yaml"
+      - "scenarios/worker/fatigue_escalation.yaml"
+      - "scenarios/worker/fall_incident.yaml"
+
+  - persona: "personas/cardiac_patient.yaml"
+    scenarios:
+      - "scenarios/health/normal_resting.yaml"
+      - "scenarios/health/tachycardia_episode.yaml"
+      - "scenarios/health/low_spo2_event.yaml"

@@ -468,4 +468,58 @@ def create_app(engine) -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc))
 
+    @app.get("/scenario/content")
+    async def get_scenario_content():
+        """Return the currently loaded scenario's phases, sensors and events."""
+        try:
+            scenario = _engine._scenario
+            if not scenario:
+                return {"loaded": False}
+
+            phases = []
+            for ph in scenario.phases:
+                sensors = {
+                    name: {
+                        "min": cfg.min_value,
+                        "max": cfg.max_value,
+                        "behavior": cfg.behavior,
+                    }
+                    for name, cfg in ph.sensors.items()
+                }
+                phases.append({
+                    "name": ph.name,
+                    "start_minute": ph.start_minute,
+                    "end_minute": ph.end_minute,
+                    "noise_intensity": ph.noise_intensity,
+                    "activity": ph.activity,
+                    "sensors": sensors,
+                })
+
+            events = [
+                {
+                    "at_minute": ev.at_minute,
+                    "event_type": ev.event_type,
+                    "description": ev.description,
+                    "duration_seconds": ev.duration_seconds,
+                }
+                for ev in scenario.events
+            ]
+
+            return {
+                "loaded": True,
+                "scenario_id": scenario.scenario_id,
+                "description": scenario.description,
+                "poc_type": scenario.poc_type,
+                "total_duration_minutes": scenario.total_duration_minutes,
+                "compression": scenario.compression,
+                "phases": phases,
+                "events": events,
+            }
+        except Exception as exc:
+            logger.error(
+                "Scenario content endpoint error",
+                extra={"event": "api_error", "error": str(exc)},
+            )
+            raise HTTPException(status_code=500, detail="Failed to get scenario content")
+
     return app
