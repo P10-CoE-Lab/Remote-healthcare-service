@@ -10,6 +10,44 @@ providers:
     fallback: null
 
 profiles:
+
+  # ── Healthcare alert profiles ─────────────────────────────────
+  # These are selected by the rule engine in healthcare-alert-rules.yaml.
+
+  respiratory_emergency:          # SpO2 < 90% — hypoxaemia, act immediately
+    rules:
+      - default: true
+        channels: [email, sms]
+        priority: critical
+
+  respiratory_advisory:           # SpO2 90–93% — watch closely
+    rules:
+      - default: true
+        channels: [email]
+        priority: high
+
+  cardiac_emergency:              # HR > 150 / < 45 bpm, or HRV collapse
+    rules:
+      - default: true
+        channels: [email, sms]
+        priority: critical
+
+  cardiac_advisory:               # HR 100–150 / 45–50 bpm — tachycardia / mild bradycardia
+    rules:
+      - default: true
+        channels: [email]
+        priority: high
+
+  clinical_advisory:              # HRV 15–20 ms, or unclassified warning
+    rules:
+      - default: true
+        channels: [email]
+        priority: medium
+
+  # ── Original profiles (unchanged) ────────────────────────────
+  # sensor_alert is the fallback profile used for any sensor not
+  # covered by healthcare-alert-rules.yaml.
+
   sensor_alert:
     rules:
       - default: true

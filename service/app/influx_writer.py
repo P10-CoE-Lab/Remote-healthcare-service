@@ -60,23 +60,37 @@ def write(msg: dict) -> None:
     try:
         point = (
             Point("vitals")                          # fixed measurement name
-            # --- tags (low-cardinality metadata) ---
-            .tag("sensor_name", sensor)
-            .tag("device_id",   msg.get("device_id",  ""))
-            .tag("persona_id",  msg.get("persona_id", ""))
-            .tag("poc_type",    msg.get("poc_type",   ""))
-            .tag("condition",   msg.get("condition",  "normal"))
-            .tag("unit",        msg.get("unit",       ""))
-            .tag("phase",       msg.get("phase",      ""))
-            .tag("quality",     msg.get("quality",    ""))
-            # --- fields (numeric measurements) ---
+            # --- tags (low-cardinality metadata, used for filtering) ---
+            .tag("sensor_name",  sensor)
+            .tag("device_id",    msg.get("device_id",   ""))
+            .tag("persona_id",   msg.get("persona_id",  ""))
+            .tag("poc_type",     msg.get("poc_type",    ""))
+            .tag("condition",    msg.get("condition",   "normal"))
+            .tag("unit",         msg.get("unit",        ""))
+            .tag("phase",        msg.get("phase",       ""))
+            .tag("quality",      msg.get("quality",     ""))
+            .tag("fault_active", str(bool(msg.get("fault_active", False))).lower())
+            # --- fields (numeric measurements — value is the only plotted field) ---
             .field("value",           float(msg["value"]))
-            .field("fault_active",    int(msg.get("fault_active", False)))
             .field("sequence_number", int(msg.get("sequence_number", 0)))
             # --- timestamp from the simulator, not the server clock ---
             .time(_parse_timestamp(msg.get("timestamp_utc", "")), WritePrecision.NS)
         )
         _write_api.write(bucket=config.INFLUXDB_BUCKET, record=point)
-        log.info("WRITE OK  sensor=%-25s bucket=%s", sensor, config.INFLUXDB_BUCKET)
+        log.info(
+            "WRITE OK  sensor=%-25s bucket=%-8s | "
+            "value=%-8s unit=%-8s condition=%-8s quality=%-10s "
+            "phase=%-20s fault_active=%s seq=%s ts=%s",
+            sensor,
+            config.INFLUXDB_BUCKET,
+            msg.get("value"),
+            msg.get("unit", ""),
+            msg.get("condition", ""),
+            msg.get("quality", ""),
+            msg.get("phase", ""),
+            int(msg.get("fault_active", False)),
+            msg.get("sequence_number", 0),
+            msg.get("timestamp_utc", ""),
+        )
     except Exception as e:
         log.error("WRITE FAIL sensor=%-25s error=%s", sensor, e)

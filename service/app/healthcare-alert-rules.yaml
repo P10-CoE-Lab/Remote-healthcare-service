@@ -1,0 +1,91 @@
+# healthcare-alert-rules.yaml
+# Clinical alert routing rules for the Remote Healthcare service.
+#
+# Rules are evaluated top-to-bottom — the FIRST matching rule wins.
+# The matched rule's "profile" is sent to the Notification Service.
+#
+# Matching fields:
+#   sensor      : sensor_name to match, or "*" to match any sensor
+#   condition   : "warning" | "critical" | list [warning, critical]
+#   value_lt    : match if value < threshold
+#   value_gt    : match if value > threshold
+#   value_range : [low_inclusive, high_exclusive]
+#
+# If no rule matches, the fallback profile "sensor_alert" is used,
+# which preserves the original behaviour for unknown sensors.
+
+alert_rules:
+
+  # ── SpO2 (Oxygen Saturation) ──────────────────────────────────
+  # < 85%      : severe hypoxaemia — life-threatening
+  - name: spo2_severe_hypoxemia
+    sensor: spo2
+    condition: critical
+    value_lt: 85
+    profile: respiratory_emergency
+
+  # 85–90%     : moderate hypoxaemia — urgent intervention
+  - name: spo2_moderate_hypoxemia
+    sensor: spo2
+    condition: critical
+    value_range: [85, 90]
+    profile: respiratory_emergency
+
+  # 90–93%     : mild hypoxaemia — monitor closely
+  - name: spo2_mild_hypoxemia
+    sensor: spo2
+    condition: warning
+    value_range: [90, 93]
+    profile: respiratory_advisory
+
+  # ── Heart Rate ────────────────────────────────────────────────
+  # > 150 bpm  : severe tachycardia — haemodynamic instability risk
+  - name: heart_rate_severe_tachy
+    sensor: heart_rate
+    condition: critical
+    value_gt: 150
+    profile: cardiac_emergency
+
+  # < 45 bpm   : severe bradycardia — syncope / cardiac arrest risk
+  - name: heart_rate_severe_brady
+    sensor: heart_rate
+    condition: critical
+    value_lt: 45
+    profile: cardiac_emergency
+
+  # 100–150 bpm: tachycardia onset — clinically significant
+  - name: heart_rate_tachy_warning
+    sensor: heart_rate
+    condition: warning
+    value_range: [100, 150]
+    profile: cardiac_advisory
+
+  # 45–50 bpm  : mild bradycardia — monitor
+  - name: heart_rate_brady_warning
+    sensor: heart_rate
+    condition: warning
+    value_range: [45, 50]
+    profile: cardiac_advisory
+
+  # ── Heart Rate Variability (HRV) ──────────────────────────────
+  # < 15 ms    : very low HRV during tachycardia — autonomic collapse
+  - name: hrv_critical
+    sensor: heart_rate_variability
+    condition: critical
+    value_lt: 15
+    profile: cardiac_emergency
+
+  # 15–20 ms   : reduced HRV — elevated autonomic stress
+  - name: hrv_warning
+    sensor: heart_rate_variability
+    condition: warning
+    value_range: [15, 20]
+    profile: clinical_advisory
+
+  # ── Fallback ─────────────────────────────────────────────────
+  # Any warning/critical that did not match a specific rule above.
+  # Uses the original "sensor_alert" profile — preserves existing behaviour.
+  - name: default_alert
+    sensor: "*"
+    condition: [warning, critical]
+    profile: sensor_alert
