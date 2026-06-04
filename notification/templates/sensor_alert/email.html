@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: Arial, sans-serif; color: #333; }
+    .alert-box { border: 2px solid #e74c3c; border-radius: 6px; padding: 16px; max-width: 520px; }
+    .alert-title { font-size: 20px; font-weight: bold; color: #e74c3c; margin-bottom: 12px; }
+    table { border-collapse: collapse; width: 100%; }
+    td { padding: 8px 12px; border-bottom: 1px solid #eee; }
+    td:first-child { font-weight: bold; width: 40%; }
+    .footer { margin-top: 16px; font-size: 12px; color: #888; }
+  </style>
+</head>
+<body>
+  <div class="alert-box">
+    <div class="alert-title">Sensor Alert</div>
+    <table>
+      <tr><td>Sensor ID</td><td>{{ payload.sensor_id }}</td></tr>
+      <tr><td>Value</td><td>{{ payload.value }} {{ payload.unit }}</td></tr>
+      <tr><td>Threshold</td><td>{{ payload.threshold }} {{ payload.unit }}</td></tr>
+      <tr><td>Priority</td><td>{{ payload.get('priority', 'medium') }}</td></tr>
+      <tr><td>Recipient</td><td>{{ recipient.get('name', recipient.get('email', '')) }}</td></tr>
+    </table>
+    <div class="footer">This is an automated notification. Do not reply.</div>
+  </div>
+</body>
+</html>

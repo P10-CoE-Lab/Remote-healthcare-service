@@ -1,0 +1,1 @@
+{"event": "sensor_alert", "sensor_id": "{{ payload.sensor_id }}", "value": {{ payload.value }}, "unit": "{{ payload.unit }}", "threshold": {{ payload.threshold }}, "priority": "{{ payload.get('priority', 'medium') }}"}

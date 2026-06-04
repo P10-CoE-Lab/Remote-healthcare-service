@@ -1,0 +1,12 @@
+MAINTENANCE REPORT
+==================
+
+Report ID    : {{ payload.get('report_id', 'N/A') }}
+System       : {{ payload.get('system', 'N/A') }}
+Status       : {{ payload.get('status', 'N/A') }}
+Scheduled At : {{ payload.get('scheduled_at', 'N/A') }}
+Recipient    : {{ recipient.get('name', recipient.get('email', '')) }}
+
+{{ body }}
+
+This is an automated notification. Do not reply.

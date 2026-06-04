@@ -23,9 +23,11 @@ All services are defined in `docker-compose.yml` and start with a single command
 ## Prerequisites
 
 - Docker and Docker Compose installed and running
-- The following sibling folders must exist next to this one:
-  - `../Human-Vitals-Simulator`
-  - `../Notification_Service`
+
+All modules are self-contained inside this repository:
+- `notification/` — Notification Service
+- `simulator_service/` — Human Vitals Simulator
+- `service/` — Remote Healthcare ingestion app
 
 ---
 

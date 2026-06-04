@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: Arial, sans-serif; color: #333; }
+    .health-box { border-radius: 6px; padding: 16px; max-width: 520px; }
+    .down { border: 2px solid #e74c3c; }
+    .up   { border: 2px solid #2ecc71; }
+    .health-title { font-size: 20px; font-weight: bold; margin-bottom: 12px; }
+    .down .health-title { color: #e74c3c; }
+    .up   .health-title { color: #2ecc71; }
+    table { border-collapse: collapse; width: 100%; }
+    td { padding: 8px 12px; border-bottom: 1px solid #eee; }
+    td:first-child { font-weight: bold; width: 40%; }
+    .footer { margin-top: 16px; font-size: 12px; color: #888; }
+  </style>
+</head>
+<body>
+  <div class="health-box {{ 'down' if payload.get('status') == 'down' else 'up' }}">
+    <div class="health-title">System Health Alert</div>
+    <table>
+      <tr><td>Service</td><td>{{ payload.get('service', 'N/A') }}</td></tr>
+      <tr><td>Status</td><td>{{ payload.get('status', 'N/A') }}</td></tr>
+      <tr><td>Region</td><td>{{ payload.get('region', 'N/A') }}</td></tr>
+      <tr><td>Checked At</td><td>{{ payload.get('checked_at', 'N/A') }}</td></tr>
+    </table>
+    <div class="footer">This is an automated notification. Do not reply.</div>
+  </div>
+</body>
+</html>

@@ -81,7 +81,7 @@ services:
   # -----------------------------------------------------------
 
   remote-healthcare:
-    build: ./service
+    build: ./healthcare_service
     environment:
       MQTT_HOST:        mosquitto
       MQTT_PORT:        "1883"
@@ -101,7 +101,7 @@ services:
     restart: unless-stopped
 
   simulator:
-    build: ../Human-Vitals-Simulator
+    build: ./simulator_service
     environment:
       MQTT_HOST: mosquitto
       MQTT_PORT: "1883"
@@ -115,7 +115,7 @@ services:
     restart: unless-stopped
 
   notification:
-    build: ../Notification_Service
+    build: ./notification
     ports:
       - "8000:8000"
     environment:
@@ -126,7 +126,7 @@ services:
       GMAIL_APP_PASSWORD:       ${GMAIL_APP_PASSWORD:-}
     volumes:
       - ./notification-config.yaml:/app/notification-config.yaml:ro
-      - ../Notification_Service/templates:/app/templates:ro
+      - ./notification/templates:/app/templates:ro
       - notification_logs:/app/logs
     depends_on:
       - mailhog
