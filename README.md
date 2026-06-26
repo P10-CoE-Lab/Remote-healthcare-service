@@ -1,315 +1,255 @@
-# Vitals Simulator
+# Remote Healthcare Monitoring Simulator
 
-A scenario-driven IoT sensor data simulator for two healthcare and safety POC projects.
-Simulates factory workers and cardiac patients, publishing realistic sensor streams over MQTT
-to InfluxDB and Grafana — purpose-built as a live demo tool.
+A scenario-driven IoT simulator for a remote cardiac monitoring POC.
+Simulates patients wearing wrist/chest devices (PPG + ECG), publishing realistic biometric streams over MQTT to InfluxDB and Grafana — built as a live demo and development tool.
 
 ---
 
 ## What This Is
 
-This simulator serves two independent IoT proof-of-concept projects that share the same data
-pipeline (MQTT → InfluxDB → Grafana).
+The simulator generates realistic biometric sensor data for cardiac patients and feeds it through a full IoT pipeline. A dual-layer rule engine (deterministic edge rules + ML-based personalised anomaly detection) evaluates the data and fires clinical alerts. An LLM integration produces AI-generated clinical briefings on demand.
 
-**POC 1 — Worker Safety Wearable**
-Simulates a factory worker wearing a belt unit (IMU) and wrist unit (heart rate + temperature).
-Detects unsafe posture, fatigue, falls, and inactivity.
+**Pipeline:**
+```
+Simulator → MQTT → Telegraf → InfluxDB → Grafana
+                           ↘ Rule Engine → Alerts → Demo UI + Notifications
+```
 
-**POC 2 — Remote Healthcare Monitoring**
-Simulates a cardiac patient wearing a wrist/chest device (PPG + ECG).
-Detects tachycardia, bradycardia, low SpO2, and irregular rhythm.
-
-Both POCs share the same simulation engine. The `personas/` YAML defines who is being simulated.
-The `scenarios/` YAML defines what happens to them. No code changes are needed to run a new demo.
+**Key capabilities:**
+- Scenario-driven patient simulation (tachycardia, bradycardia, SpO₂ drops, HRV stress, recovery)
+- Multi-patient fleet management (add/remove patients at runtime via the UI)
+- Edge rules — fast deterministic threshold detection
+- Cloud rules — personalised anomaly detection using Isolation Forest (per-patient baseline)
+- AI clinical briefings via Gemini, Claude, or OpenAI
+- Email/SMS alert notifications via configurable channels
+- React-based clinician UI (operator view + patient view)
 
 ---
 
 ## Quick Start
 
-### 1. Clone the repository
+### 1. Clone and enter the repo
 
 ```bash
-git clone https://github.com/<your-username>/vitals-simulator.git
-cd vitals-simulator
+git clone https://github.com/P10-CoE-Lab/Remote-healthcare-service.git
+cd Remote-healthcare-service
 ```
 
-### 2. Create a virtual environment
+### 2. Create a virtual environment and install dependencies
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate        # Linux / macOS
-# .venv\Scripts\activate         # Windows
-```
-
-### 3. Install dependencies
-
-```bash
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 4. Start the dev infrastructure (MQTT + InfluxDB + Grafana)
-
-```bash
-docker compose -f docker-compose.dev.yml up -d
-```
-
-### 5. Copy environment config
+### 3. Configure environment
 
 ```bash
 cp .env.example .env
-# Edit .env if your broker or InfluxDB runs on non-default addresses
+# Edit .env — at minimum set ALERT_EMAIL and LLM_PROVIDER
 ```
 
-### 6. Run a scenario
+### 4. Build the React UI
 
 ```bash
-# Worker safety — fatigue over 8-hour shift (plays in ~8 minutes at 60x compression)
-python run.py \
-  --persona personas/welder_factory.yaml \
-  --scenario scenarios/worker/fatigue_escalation.yaml \
-  --compression 60 \
-  --demo
-
-# Healthcare — tachycardia episode (plays in ~3 minutes at 10x compression)
-python run.py \
-  --persona personas/cardiac_patient.yaml \
-  --scenario scenarios/health/tachycardia_episode.yaml \
-  --compression 10 \
-  --demo
-
-# Batch mode — run all persona/scenario entries from one file (sequentially)
-python run.py \
-  --run-matrix config/run_matrix.yaml \
-  --compression 60
-
-# Single-file demo mode — uses runtime.demo_api_port and runtime.default_demo
-# from config/run_matrix.yaml
-python run.py \
-  --run-matrix config/run_matrix.yaml \
-  --demo
-
-# Incident audit mode — check each scenario event against thresholds
-# and generate one consolidated above/below report file
-python run.py \
-  --incident-threshold-check
+cd demo/ui
+npm install
+npm run build
+cd ../..
 ```
+
+### 5. Start everything
+
+```bash
+./start.sh
+```
+
+### 6. Stop everything
+
+```bash
+./stop.sh
+```
+
+---
+
+## Services and Ports
 
 | Service | URL | Credentials |
 |---|---|---|
-| Demo control UI | http://localhost:8000 | — |
-| Grafana dashboard | http://localhost:3000 | admin / admin |
-| InfluxDB | http://localhost:8086 | — |
+| Demo UI (React) | http://localhost:8000 | — |
+| Grafana | http://localhost:3000 | admin / admin |
+| InfluxDB | http://localhost:8086 | token: `my-token` |
+| Mailhog (email preview) | http://localhost:8025 | — |
+
+---
+
+## Demo UI
+
+The React UI has two views:
+
+**Operator view** (`http://localhost:8000`)
+Add and remove patients from the monitoring fleet. Each patient can be assigned a persona and scenario. Start/stop simulation per patient. View fleet-wide alert feed.
+
+**Patient / Clinician view** (`http://localhost:8000/operator`)
+Per-patient vitals (heart rate, SpO₂, HRV sparklines). Real-time alert feed with SHAP-based explanations. AI Briefing button generates a full four-section clinical summary on demand.
+
+For development with hot-reload:
+```bash
+cd demo/ui
+npm run dev      # starts Vite dev server at http://localhost:5173
+                 # proxies /api requests to http://localhost:8000
+```
+
+---
+
+## Available Personas
+
+| File | Description |
+|---|---|
+| `cardiac_patient.yaml` | Female, 65 yrs, known cardiac risk |
+| `diabetic_cardiac.yaml` | Diabetic patient with cardiac comorbidity |
+| `elderly_hypertensive.yaml` | Elderly patient with hypertension |
+| `post_surgery_recovery.yaml` | Post-cardiac-surgery recovery patient |
+| `young_arrhythmia.yaml` | Young patient with arrhythmia |
+
+---
+
+## Available Scenarios
+
+| File | Story | Duration | Compression |
+|---|---|---|---|
+| `health/tachycardia_episode.yaml` | Resting → sudden tachycardia → recovery | 30 min | 10× (3 real min) |
+| `health/bradycardia_episode.yaml` | Gradual heart rate drop → bradycardia alarm | 30 min | 10× |
+| `health/low_spo2_event.yaml` | SpO₂ drop with tachycardia response | 30 min | 10× |
+| `health/hrv_stress_pattern.yaml` | HRV deterioration pattern indicating stress | 30 min | 10× |
+| `health/combined_deterioration.yaml` | Multi-parameter deterioration (HR + SpO₂ + HRV) | 45 min | 10× |
+| `health/night_episode.yaml` | Nocturnal event — bradycardia + SpO₂ dip | 30 min | 10× |
+| `health/recovery_progression.yaml` | Gradual recovery from an acute episode | 45 min | 10× |
+| `health/normal_resting.yaml` | Stable vitals baseline, no events | 30 min | 10× |
+
+---
+
+## Rule Engine
+
+The rule engine runs as a separate service alongside the simulator.
+
+**Edge layer** (`rule_engine/edge/`)
+Deterministic YAML-configured threshold rules. Fires immediately when a vital crosses a defined boundary. Rules defined in `config/edge_rules.yaml`.
+
+**Cloud layer** (`rule_engine/cloud/`)
+Personalised anomaly detection using Isolation Forest. Learns each patient's individual baseline over the first ~40 data points, then flags deviations. Rules defined in `config/cloud_rules.yaml`. SHAP values explain each anomaly flag.
+
+The rule engine service subscribes to MQTT, evaluates incoming vitals, and publishes alerts back to MQTT. The demo API picks these up and routes them to the UI.
+
+---
+
+## LLM Integration
+
+Clinical summaries and per-alert explanations are generated by an LLM provider. Configure in `.env`:
+
+```bash
+# Provider: mock | anthropic | openai | gemini
+LLM_PROVIDER=gemini
+LLM_API_KEY=your-api-key-here
+
+# Optional model overrides — leave blank to use provider defaults
+LLM_FAST_MODEL=          # used for per-alert explanations
+LLM_QUALITY_MODEL=       # used for on-demand patient summaries
+```
+
+| Provider | Fast model (per-alert) | Quality model (summary) |
+|---|---|---|
+| `mock` | Built-in template (no API key) | Built-in template |
+| `gemini` | gemini-2.0-flash | gemini-2.0-flash |
+| `anthropic` | claude-haiku-4-5-20251001 | claude-sonnet-4-6 |
+| `openai` | gpt-4o-mini | gpt-4o |
+
+---
+
+## Email Notifications
+
+Alerts can be emailed to a clinician. Configure in `.env`:
+
+```bash
+ALERT_EMAIL=clinician@hospital.com
+ALERT_EMAIL_NAME="Remote Monitoring Team"
+ALERT_COOLDOWN_SECONDS=120     # minimum gap between emails for the same patient + rule
+NOTIFICATION_SERVICE_URL=http://localhost:8001
+```
+
+Email is delivered via Mailhog in development (visible at http://localhost:8025). No real email is sent unless you configure an SMTP provider in `Notification_Service/notification-config.yaml`.
 
 ---
 
 ## Project Structure
 
 ```
-vitals-simulator/
-│
-├── personas/                  WHO is being simulated (YAML config)
-│   ├── welder_factory.yaml
-│   ├── cardiac_patient.yaml
-│   └── _template.yaml         ← copy this to create a new persona
-│
-├── scenarios/                 WHAT happens to them (YAML config)
-│   ├── worker/
-│   │   ├── normal_shift.yaml
-│   │   ├── fatigue_escalation.yaml
-│   │   └── fall_incident.yaml
-│   └── health/
-│       ├── normal_resting.yaml
-│       ├── tachycardia_episode.yaml
-│       └── low_spo2_event.yaml
+├── personas/                  WHO is being simulated (YAML)
+├── scenarios/health/          WHAT happens to them (YAML)
 │
 ├── simulator/
 │   ├── core/                  Scenario engine, YAML loaders, condition mapper
 │   ├── engine/                Signal, noise, correlation, fault generators
-│   ├── rules/                 Rules engine for monitoring and alerts (separate from ingestion)
-│   ├── sensors/               Per-sensor generators + registry
-│   ├── transport/             MQTT publisher
-│   └── utils/                 Logger, time compressor
+│   ├── sensors/               Per-sensor generators and registry
+│   └── transport/             MQTT publisher
+│
+├── rule_engine/
+│   ├── edge/                  Deterministic threshold rules
+│   ├── cloud/                 Isolation Forest personalised anomaly detection
+│   ├── llm/                   LLM provider, context builder, summariser
+│   ├── alert_notifier.py      Routes alerts to Notification Service
+│   └── service.py             Standalone MQTT microservice entrypoint
 │
 ├── demo/
-│   ├── demo_api.py            FastAPI control layer (3 endpoints)
-│   └── static/index.html     Browser control panel (vanilla JS, no framework)
+│   ├── demo_api.py            FastAPI backend (fleet, patients, alerts, summaries)
+│   ├── static/                Built React UI (output of npm run build)
+│   └── ui/                    React + TypeScript + Tailwind source
+│
+├── Notification_Service/      Email/SMS/webhook notification microservice
 │
 ├── config/
-│   ├── mqtt_config.yaml
-│   └── simulator_config.yaml
+│   ├── edge_rules.yaml        Edge rule definitions
+│   └── cloud_rules.yaml       Cloud rule definitions
 │
-├── docker/                    Grafana dashboards, Mosquitto, Telegraf config
-├── docker-compose.dev.yml     Dev infrastructure stack
-├── Dockerfile                 Simulator image (connects to external stack)
+├── docker/                    Grafana dashboards, Telegraf, Mosquitto config
+├── docker-compose.dev.yml     Full dev stack (MQTT, InfluxDB, Grafana, Mailhog)
 ├── .env.example               Environment variable template
 ├── requirements.txt
-└── run.py                     Single entry point
+├── run.py                     Simulator entry point
+├── start.sh                   Start all services
+└── stop.sh                    Stop all services
 ```
-
----
-
-## Available Personas and Scenarios
-
-### Personas
-
-| Persona file | Description | POC type |
-|---|---|---|
-| `welder_factory.yaml` | Male factory welder, 40 yrs, 10 yrs experience | Worker Safety |
-| `cardiac_patient.yaml` | Female, 65 yrs, known cardiac risk | Healthcare |
-
-### Scenarios
-
-| Scenario file | Description | Duration |
-|---|---|---|
-| `worker/normal_shift.yaml` | Uneventful 8-hour shift | 8 hours |
-| `worker/fatigue_escalation.yaml` | Gradual fatigue, ends with safety alert | 8 hours |
-| `worker/fall_incident.yaml` | Sudden fall event with recovery | 2 hours |
-| `health/normal_resting.yaml` | Patient at rest, stable vitals | 30 min |
-| `health/tachycardia_episode.yaml` | Sudden tachycardia onset and recovery | 30 min |
-| `health/low_spo2_event.yaml` | SpO2 drop event | 30 min |
-
----
-
-## MQTT Topics and Payload
-
-Sensor readings are published to:
-
-```
-iots/{poc_type}/{persona_id}/{sensor_name}
-```
-
-Examples:
-```
-iots/worker_safety/welder_factory/heart_rate
-iots/worker_safety/welder_factory/posture_angle
-iots/healthcare/cardiac_patient/heart_rate
-iots/healthcare/cardiac_patient/spo2
-```
-
-Payload schema (all sensors, all POCs):
-
-```json
-{
-  "timestamp_utc": "2026-03-31T10:42:15.123000+00:00",
-  "device_id": "sim-welder_factory-001",
-  "persona_id": "welder_factory",
-  "poc_type": "worker_safety",
-  "sensor_name": "heart_rate",
-  "value": 84.2,
-  "unit": "bpm",
-  "phase": "early_fatigue",
-  "condition": "normal",
-  "quality": "good",
-  "fault_active": false,
-  "sequence_number": 4217
-}
-```
-
----
-
-## Demo API
-
-The demo API runs on `http://localhost:8000` when `--demo` is passed to `run.py`.
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/status` | GET | Current scenario, phase, elapsed time |
-| `/scenario/load` | POST | Load a scenario by ID, reset engine |
-| `/event/trigger` | POST | Fire a named event immediately |
 
 ---
 
 ## Environment Variables
 
-All connection details are supplied via environment variables. Copy `.env.example` to `.env` and edit:
+Copy `.env.example` to `.env` and set:
 
 ```bash
+# Alert email (leave blank to disable)
+ALERT_EMAIL=
+ALERT_EMAIL_NAME="Healthcare Monitoring Team"
+ALERT_COOLDOWN_SECONDS=120
+NOTIFICATION_SERVICE_URL=http://localhost:8001
+
+# MQTT
 MQTT_HOST=localhost
 MQTT_PORT=1883
-MQTT_USERNAME=                     # optional
-MQTT_PASSWORD=                     # optional
+
+# InfluxDB
 INFLUXDB_URL=http://localhost:8086
 INFLUXDB_TOKEN=my-token
 INFLUXDB_ORG=iot_org
 INFLUXDB_BUCKET=iot_poc
-LOG_LEVEL=INFO
-DEMO_API_PORT=8000
+
+# LLM
+LLM_PROVIDER=mock          # mock | anthropic | openai | gemini
+LLM_API_KEY=
+LLM_FAST_MODEL=
+LLM_QUALITY_MODEL=
 ```
-
----
-
-## Docker Usage
-
-The simulator image connects to an external infrastructure stack. It does **not** own MQTT,
-InfluxDB, or Grafana. Those are provided by the POC project's own `docker-compose.yml`.
-
-Build the image:
-
-```bash
-docker build -t vitals-simulator .
-```
-
-Run against an existing stack:
-
-```bash
-docker run --rm \
-  -e MQTT_HOST=mosquitto \
-  -e MQTT_PORT=1883 \
-  -e INFLUXDB_URL=http://influxdb:8086 \
-  -e INFLUXDB_TOKEN=my-token \
-  -e INFLUXDB_ORG=iot_org \
-  -e INFLUXDB_BUCKET=iot_poc \
-  -p 8000:8000 \
-  vitals-simulator \
-  --persona personas/welder_factory.yaml \
-  --scenario scenarios/worker/fatigue_escalation.yaml \
-  --demo
-```
-
-Typical integration inside a POC project's `docker-compose.yml`:
-
-```yaml
-services:
-  simulator:
-    build: ./vitals_simulator
-    ports:
-      - "8000:8000"
-    environment:
-      MQTT_HOST: mosquitto
-      INFLUXDB_URL: http://influxdb:8086
-      INFLUXDB_TOKEN: ${INFLUXDB_TOKEN}
-      INFLUXDB_ORG: ${INFLUXDB_ORG}
-      INFLUXDB_BUCKET: ${INFLUXDB_BUCKET}
-    command: >
-      --persona personas/welder_factory.yaml
-      --scenario scenarios/worker/fatigue_escalation.yaml
-      --demo
-    depends_on:
-      - mosquitto
-      - influxdb
-```
-
----
-
-## Adding a New Persona (No Code Required)
-
-1. Copy `personas/_template.yaml`
-2. Fill in baseline sensor ranges and alert thresholds for the new person
-3. Save with a descriptive name, e.g. `warehouse_picker.yaml`
-4. Reference it in any scenario YAML
-
-## Adding a New Scenario (No Code Required)
-
-1. Copy `scenarios/_template.yaml`
-2. Define phases (time windows with sensor ranges) and scripted events
-3. Reference an existing persona
-4. Save and run with `python run.py --persona ... --scenario ...`
-
-## Adding a New Sensor Type (Code Required)
-
-1. Create `simulator/sensors/new_sensor.py` implementing the `BaseSensor` interface
-2. Register it in `simulator/sensors/registry.py`
-3. Add its baseline ranges to the relevant persona YAML
 
 ---
 
@@ -321,8 +261,16 @@ pytest tests/
 
 ---
 
-## Deactivating the Virtual Environment
+## Adding a New Persona (No Code Required)
 
-```bash
-deactivate
-```
+1. Copy `personas/_template.yaml`
+2. Fill in baseline sensor ranges and alert thresholds
+3. Save with a descriptive name, e.g. `pediatric_cardiac.yaml`
+4. Select it in the UI when adding a patient
+
+## Adding a New Scenario (No Code Required)
+
+1. Copy `scenarios/_template.yaml`
+2. Define phases (time windows with sensor ranges) and scripted events
+3. Reference an existing persona
+4. Save in `scenarios/health/` — it appears automatically in the UI dropdown

@@ -1,1 +1,0 @@
-docker build -t vitals-simulator /home/p10/Documents/projects/IOT-COE/Human-Vitals-Simulator && docker run -d --name vitals-sim-test -p 8000:8000 vitals-simulator
