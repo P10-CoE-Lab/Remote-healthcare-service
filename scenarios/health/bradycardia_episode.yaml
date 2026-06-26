@@ -1,0 +1,99 @@
+# scenarios/health/bradycardia_episode.yaml
+# Patient experiences slow HR onset, drops below 50 bpm, alert fires.
+
+schema_version: "1.0"
+scenario_id: bradycardia_episode
+description: "HR gradually slows, drops below bradycardia threshold, then recovers"
+persona: elderly_hypertensive
+poc_type: healthcare
+
+total_duration_minutes: 30
+compression: 10
+
+phases:
+  - name: resting_normal
+    start_minute: 0
+    end_minute: 10
+    sensors:
+      heart_rate:
+        min: 72
+        max: 85
+        behavior: oscillating_stable
+      spo2:
+        min: 95
+        max: 98
+        behavior: oscillating_stable
+      heart_rate_variability:
+        min: 22
+        max: 38
+        behavior: oscillating_stable
+    noise_intensity: low
+
+  - name: slowing
+    start_minute: 10
+    end_minute: 18
+    sensors:
+      heart_rate:
+        min: 55
+        max: 72
+        behavior: monotonic_falling
+      spo2:
+        min: 93
+        max: 96
+        behavior: monotonic_falling    # mild SpO2 drop as cardiac output falls
+      heart_rate_variability:
+        min: 28
+        max: 45
+        behavior: monotonic_rising     # HRV paradoxically rises as HR slows
+    noise_intensity: medium
+
+  - name: bradycardia
+    start_minute: 18
+    end_minute: 24
+    sensors:
+      heart_rate:
+        min: 42
+        max: 52
+        behavior: mean_reverting
+      spo2:
+        min: 90
+        max: 94
+        behavior: oscillating_stable
+      heart_rate_variability:
+        min: 35
+        max: 55
+        behavior: oscillating_stable
+    noise_intensity: medium
+
+  - name: recovery
+    start_minute: 24
+    end_minute: 30
+    sensors:
+      heart_rate:
+        min: 62
+        max: 78
+        behavior: monotonic_rising
+      spo2:
+        min: 94
+        max: 97
+        behavior: monotonic_rising
+      heart_rate_variability:
+        min: 22
+        max: 38
+        behavior: monotonic_falling
+    noise_intensity: low
+
+events:
+  - at_minute: 18
+    type: bradycardia_onset
+    description: "HR drops to critically low level"
+    overrides:
+      heart_rate: 44
+    duration_seconds: 30
+
+  - at_minute: 21
+    type: low_spo2
+    description: "SpO2 drops as cardiac output is reduced"
+    overrides:
+      spo2: 90
+    duration_seconds: 45

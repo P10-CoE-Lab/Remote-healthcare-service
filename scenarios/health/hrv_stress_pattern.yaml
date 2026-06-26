@@ -1,0 +1,92 @@
+# scenarios/health/hrv_stress_pattern.yaml
+# HRV drops steadily over time indicating sustained cardiac stress.
+
+schema_version: "1.0"
+scenario_id: hrv_stress_pattern
+description: "HRV degrades steadily over 35 minutes while HR rises moderately — cardiac stress indicator"
+persona: young_arrhythmia
+poc_type: healthcare
+
+total_duration_minutes: 35
+compression: 10
+
+phases:
+  - name: baseline
+    start_minute: 0
+    end_minute: 8
+    sensors:
+      heart_rate:
+        min: 62
+        max: 76
+        behavior: oscillating_stable
+      spo2:
+        min: 97
+        max: 99
+        behavior: oscillating_stable
+      heart_rate_variability:
+        min: 22
+        max: 34
+        behavior: oscillating_stable
+    noise_intensity: low
+
+  - name: early_stress
+    start_minute: 8
+    end_minute: 18
+    sensors:
+      heart_rate:
+        min: 74
+        max: 88
+        behavior: monotonic_rising
+      spo2:
+        min: 96
+        max: 98
+        behavior: oscillating_stable
+      heart_rate_variability:
+        min: 14
+        max: 24
+        behavior: monotonic_falling
+    noise_intensity: medium
+
+  - name: sustained_stress
+    start_minute: 18
+    end_minute: 28
+    sensors:
+      heart_rate:
+        min: 88
+        max: 102
+        behavior: mean_reverting
+      spo2:
+        min: 95
+        max: 97
+        behavior: oscillating_stable
+      heart_rate_variability:
+        min: 8
+        max: 16
+        behavior: monotonic_falling
+    noise_intensity: medium
+
+  - name: deep_stress
+    start_minute: 28
+    end_minute: 35
+    sensors:
+      heart_rate:
+        min: 95
+        max: 115
+        behavior: mean_reverting
+      spo2:
+        min: 94
+        max: 96
+        behavior: oscillating_stable
+      heart_rate_variability:
+        min: 5
+        max: 12
+        behavior: oscillating_stable
+    noise_intensity: high
+
+events:
+  - at_minute: 28
+    type: tachycardia_onset
+    description: "Arrhythmia episode triggered by sustained low HRV"
+    overrides:
+      heart_rate: 112
+    duration_seconds: 45

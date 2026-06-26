@@ -1,0 +1,48 @@
+# personas/post_surgery_recovery.yaml
+# Persona: Male, 58 years old, post-cardiac surgery, SpO2 sensitive, moderate HR.
+
+schema_version: "1.0"
+persona_id: post_surgery_recovery
+description: "Male, 58 years old, post-cardiac surgery, SpO2-sensitive, on monitoring protocol"
+poc_type: healthcare
+
+baseline:
+  heart_rate:
+    min: 65
+    max: 82
+    unit: bpm
+    sampling_interval_ms: 1000
+
+  spo2:
+    min: 95
+    max: 98
+    unit: percent
+    sampling_interval_ms: 2000
+
+  heart_rate_variability:
+    min: 25
+    max: 50
+    unit: ms
+    sampling_interval_ms: 5000
+
+thresholds:
+  heart_rate_high: 105       # bpm — low tolerance for elevated HR post-surgery
+  heart_rate_low: 50         # bpm — bradycardia boundary
+  spo2_low: 94               # percent — strict; post-surgical SpO2 drops are high risk
+  hrv_low: 18                # ms — reduced HRV expected post-op
+
+noise_profile:
+  heart_rate:             gaussian
+  spo2:                   quantization
+  heart_rate_variability: drift          # HRV drifts as surgical recovery progresses
+
+correlations:
+  - leader_sensor: heart_rate
+    follower_sensor: spo2
+    coupling_strength: -0.4    # post-surgical tissue sensitivity amplifies coupling
+    lag_seconds: 30
+
+  - leader_sensor: heart_rate
+    follower_sensor: heart_rate_variability
+    coupling_strength: -0.35
+    lag_seconds: 10

@@ -1,0 +1,10 @@
+SENSOR ALERT
+============
+
+Sensor ID : {{ payload.sensor_id }}
+Value     : {{ payload.value }} {{ payload.unit }}
+Threshold : {{ payload.threshold }} {{ payload.unit }}
+Priority  : {{ payload.get('priority', 'medium') }}
+Recipient : {{ recipient.get('name', recipient.get('email', '')) }}
+
+This is an automated notification. Do not reply.

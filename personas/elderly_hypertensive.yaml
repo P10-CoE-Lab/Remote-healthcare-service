@@ -1,0 +1,48 @@
+# personas/elderly_hypertensive.yaml
+# Persona: Male, 72 years old, hypertension, elevated HR baseline.
+
+schema_version: "1.0"
+persona_id: elderly_hypertensive
+description: "Male, 72 years old, long-standing hypertension, elevated resting HR"
+poc_type: healthcare
+
+baseline:
+  heart_rate:
+    min: 72
+    max: 88
+    unit: bpm
+    sampling_interval_ms: 1000
+
+  spo2:
+    min: 95
+    max: 98
+    unit: percent
+    sampling_interval_ms: 2000
+
+  heart_rate_variability:
+    min: 20
+    max: 40
+    unit: ms
+    sampling_interval_ms: 5000
+
+thresholds:
+  heart_rate_high: 110       # bpm — elevated threshold because baseline is already high
+  heart_rate_low: 48         # bpm — bradycardia boundary
+  spo2_low: 92               # percent — slightly more lenient than average
+  hrv_low: 15                # ms — hypertensives have chronically reduced HRV
+
+noise_profile:
+  heart_rate:             gaussian
+  spo2:                   quantization
+  heart_rate_variability: gaussian
+
+correlations:
+  - leader_sensor: heart_rate
+    follower_sensor: spo2
+    coupling_strength: -0.3    # hypertension amplifies HR→SpO2 coupling
+    lag_seconds: 45
+
+  - leader_sensor: heart_rate
+    follower_sensor: heart_rate_variability
+    coupling_strength: -0.5    # strong inverse: tachycardia severely suppresses HRV
+    lag_seconds: 10

@@ -64,6 +64,27 @@ services:
       - influxdb
     restart: unless-stopped
 
+  mailhog:
+    image: mailhog/mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    restart: unless-stopped
+
+  notification-service:
+    build: ./Notification_Service
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./Notification_Service/templates:/app/templates:ro
+      - ./Notification_Service/notification-config.yaml:/app/notification-config.yaml:ro
+      - ./Notification_Service/logs:/app/logs
+    env_file:
+      - ./Notification_Service/.env
+    depends_on:
+      - mailhog
+    restart: unless-stopped
+
 volumes:
   influxdb_data:
   grafana_data:

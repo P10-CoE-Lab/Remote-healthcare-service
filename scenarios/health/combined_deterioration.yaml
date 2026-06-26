@@ -1,0 +1,99 @@
+# scenarios/health/combined_deterioration.yaml
+# HR rises AND SpO2 drops simultaneously — high combined risk event.
+
+schema_version: "1.0"
+scenario_id: combined_deterioration
+description: "HR rises and SpO2 drops simultaneously, producing maximum risk score"
+persona: diabetic_cardiac
+poc_type: healthcare
+
+total_duration_minutes: 35
+compression: 10
+
+phases:
+  - name: stable_baseline
+    start_minute: 0
+    end_minute: 8
+    sensors:
+      heart_rate:
+        min: 68
+        max: 82
+        behavior: oscillating_stable
+      spo2:
+        min: 94
+        max: 97
+        behavior: oscillating_stable
+      heart_rate_variability:
+        min: 16
+        max: 30
+        behavior: oscillating_stable
+    noise_intensity: low
+
+  - name: early_deterioration
+    start_minute: 8
+    end_minute: 16
+    sensors:
+      heart_rate:
+        min: 85
+        max: 100
+        behavior: monotonic_rising
+      spo2:
+        min: 90
+        max: 95
+        behavior: monotonic_falling
+      heart_rate_variability:
+        min: 10
+        max: 22
+        behavior: monotonic_falling
+    noise_intensity: medium
+
+  - name: combined_crisis
+    start_minute: 16
+    end_minute: 26
+    sensors:
+      heart_rate:
+        min: 110
+        max: 128
+        behavior: mean_reverting
+      spo2:
+        min: 85
+        max: 91
+        behavior: mean_reverting
+      heart_rate_variability:
+        min: 8
+        max: 15
+        behavior: oscillating_stable
+    noise_intensity: high
+
+  - name: slow_recovery
+    start_minute: 26
+    end_minute: 35
+    sensors:
+      heart_rate:
+        min: 80
+        max: 95
+        behavior: monotonic_falling
+      spo2:
+        min: 92
+        max: 96
+        behavior: monotonic_rising
+      heart_rate_variability:
+        min: 12
+        max: 25
+        behavior: monotonic_rising
+    noise_intensity: medium
+
+events:
+  - at_minute: 16
+    type: tachycardia_onset
+    description: "Tachycardia begins as SpO2 continues to fall"
+    overrides:
+      heart_rate: 122
+    duration_seconds: 30
+
+  - at_minute: 19
+    type: low_spo2
+    description: "SpO2 reaches critically low level during cardiac stress"
+    overrides:
+      spo2: 84
+    duration_seconds: 60

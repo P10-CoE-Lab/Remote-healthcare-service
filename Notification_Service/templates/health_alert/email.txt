@@ -1,0 +1,32 @@
+HEALTHCARE MONITORING ALERT — {{ payload.severity | upper }}
+============================================================
+
+Patient:     {{ payload.patient_label }}
+Alert:       {{ payload.description }}
+Severity:    {{ payload.severity | upper }}
+Risk Level:  {{ payload.risk_level | upper }} (score: {{ payload.risk_score | int }}/100)
+
+VITAL SIGN READING
+------------------
+{{ payload.sensor_name }}: {{ payload.sensor_value }} {{ payload.unit }}
+Threshold:   {{ payload.threshold }} {{ payload.unit }}
+
+{% if payload.conditions_met %}
+CONDITIONS DETECTED
+-------------------
+{% for c in payload.conditions_met %}
+  - {{ c }}
+{% endfor %}
+{% endif %}
+
+DETAILS
+-------
+Source:   {{ payload.source | upper }}
+Device:   {{ payload.device_id }}
+{% if payload.timestamp_utc %}
+Time:     {{ payload.timestamp_utc[:19] | replace("T", " ") }} UTC
+{% endif %}
+
+----
+Automated alert from Remote Healthcare Monitoring System.
+Do not reply to this email.

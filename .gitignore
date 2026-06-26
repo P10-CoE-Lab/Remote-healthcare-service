@@ -28,3 +28,8 @@ SIMULATOR_OVERVIEW.md
 
 # Claude Code internal memory
 .claude/
+
+# UI build artifacts
+demo/static/assets/
+demo/ui/node_modules/
+demo/ui/dist/

@@ -1,0 +1,65 @@
+# config/edge_rules.yaml
+# -----------------------
+# Threshold-only rules for the edge engine.
+# No time windows. Each reading is evaluated immediately.
+# These fire in under 1 second — life-safety critical alerts.
+
+schema_version: "1.0"
+
+# Default cooldown between repeated alerts for the same rule + patient (seconds)
+default_cooldown_seconds: 30
+
+# Minimum time a condition must be continuously true before the alert fires.
+# Prevents false positives from sensor noise or momentary glitches.
+# Set to 0 for event-type rules (fall) that must fire immediately.
+default_min_observation_seconds: 5
+
+# Last N readings must all breach before the alert fires.
+# Catches conditions that clear and re-breach within the observation window.
+# Set to 1 for event-type rules (fall) that must fire on a single reading.
+default_consecutive_readings: 3
+
+# Topic pattern for edge alerts:
+#   alerts/edge/{persona_id}/{rule_id}
+alert_topic_prefix: "alerts/edge"
+
+rules:
+  - id: "H1-edge"
+    description: "SpO2 critically low — immediate life-safety alert"
+    sensor: "spo2"
+    operator: "<"
+    threshold: 93
+    severity: "critical"
+    cooldown_seconds: 30
+    min_observation_seconds: 5
+    consecutive_readings: 3
+
+  - id: "H2-edge"
+    description: "Heart rate very high — immediate threshold breach"
+    sensor: "heart_rate"
+    operator: ">"
+    threshold: 100
+    severity: "warning"
+    cooldown_seconds: 30
+    min_observation_seconds: 5
+    consecutive_readings: 3
+
+  - id: "H3-edge"
+    description: "Heart rate very low — immediate threshold breach"
+    sensor: "heart_rate"
+    operator: "<"
+    threshold: 50
+    severity: "critical"
+    cooldown_seconds: 30
+    min_observation_seconds: 5
+    consecutive_readings: 3
+
+  - id: "H-FALL"
+    description: "Fall detected — accelerometer impact threshold exceeded"
+    sensor: "accel_magnitude"
+    operator: ">"
+    threshold: 3.0
+    severity: "emergency"
+    cooldown_seconds: 60
+    min_observation_seconds: 0   # falls are single-event impacts — fire immediately
+    consecutive_readings: 1      # single reading sufficient for impact detection

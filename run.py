@@ -39,7 +39,6 @@ import yaml
 from simulator.core.scenario_loader import load_scenario
 from simulator.core.scenario_engine import ScenarioEngine
 from simulator.core.persona_loader import load_persona
-from simulator.rules.loader import load_rules_config
 from simulator.sensors.base import SensorReading
 from simulator.transport.mqtt_publisher import MQTTPublisher
 from simulator.utils.logger import get_logger
@@ -81,6 +80,7 @@ def _make_publish_callback(publisher: MQTTPublisher, engine: ScenarioEngine):
             poc_type=      poc_type,
             device_id=     device_id,
             sequence_num=  status.sequence_number,
+            compression=   status.compression,
         )
     return publish
 
@@ -232,131 +232,6 @@ def _select_demo_run_from_matrix(
     return run_plan[0][0], run_plan[0][1], reason
 
 
-def _find_phase_at_minute(scenario: Any, minute: float) -> Any | None:
-    """Find the active phase for the specified simulated minute."""
-    for phase in scenario.phases:
-        if phase.start_minute <= minute <= phase.end_minute:
-            return phase
-    return None
-
-
-def _build_incident_snapshot(phase: Any, overrides: dict[str, float]) -> dict[str, float]:
-    """Create a deterministic incident-time sensor snapshot for threshold checks."""
-    snapshot: dict[str, float] = {}
-    for sensor_name, cfg in phase.sensors.items():
-        snapshot[sensor_name] = (cfg.min_value + cfg.max_value) / 2.0
-
-    # Event overrides represent the incident spike/dip and take precedence.
-    for sensor_name, value in overrides.items():
-        snapshot[sensor_name] = float(value)
-
-    return snapshot
-
-
-def _evaluate_operator(value: float, operator: str, threshold: float) -> bool | None:
-    """Evaluate simple threshold operators; return None for unsupported operators."""
-    if operator == ">":
-        return value > threshold
-    if operator == "<":
-        return value < threshold
-    if operator == ">=":
-        return value >= threshold
-    if operator == "<=":
-        return value <= threshold
-    if operator == "==":
-        return value == threshold
-    if operator == "!=":
-        return value != threshold
-    return None
-
-
-def _threshold_position(value: float, threshold: float) -> str:
-    """Return whether a value is below, above, or equal to threshold."""
-    if value > threshold:
-        return "above"
-    if value < threshold:
-        return "below"
-    return "equal"
-
-
-def _build_incident_threshold_report(
-    run_plan: list[tuple[Path, Path]],
-    rules_config_path: Path,
-) -> dict[str, Any]:
-    """Build a consolidated incident threshold report for all run-plan scenarios."""
-    rules_config = load_rules_config(rules_config_path)
-
-    incidents: list[dict[str, Any]] = []
-    for persona_path, scenario_path in run_plan:
-        persona = load_persona(persona_path)
-        scenario = load_scenario(scenario_path)
-
-        for event in scenario.events:
-            phase = _find_phase_at_minute(scenario, event.at_minute)
-            if phase is None:
-                continue
-
-            snapshot = _build_incident_snapshot(phase, event.overrides)
-            condition_checks: list[dict[str, Any]] = []
-
-            for rule in rules_config.rules:
-                if not rule.enabled:
-                    continue
-                for condition in rule.conditions:
-                    value = snapshot.get(condition.sensor)
-                    if value is None:
-                        continue
-
-                    result = _evaluate_operator(value, condition.operator, condition.threshold)
-                    condition_checks.append(
-                        {
-                            "rule_id": rule.id,
-                            "rule_name": rule.name,
-                            "sensor": condition.sensor,
-                            "operator": condition.operator,
-                            "threshold": condition.threshold,
-                            "value_at_incident": round(value, 3),
-                            "position": _threshold_position(value, condition.threshold),
-                            "condition_matched": result,
-                        }
-                    )
-
-            above = sum(1 for c in condition_checks if c["position"] == "above")
-            below = sum(1 for c in condition_checks if c["position"] == "below")
-            equal = sum(1 for c in condition_checks if c["position"] == "equal")
-            matched_rule_ids = sorted({
-                c["rule_id"] for c in condition_checks if c["condition_matched"] is True
-            })
-
-            incidents.append(
-                {
-                    "persona_id": persona.persona_id,
-                    "persona_file": str(persona_path),
-                    "scenario_id": scenario.scenario_id,
-                    "scenario_file": str(scenario_path),
-                    "event_type": event.event_type,
-                    "event_description": event.description,
-                    "at_minute": event.at_minute,
-                    "phase": phase.name,
-                    "summary": {
-                        "conditions_above_threshold": above,
-                        "conditions_below_threshold": below,
-                        "conditions_equal_threshold": equal,
-                        "matched_rules_count": len(matched_rule_ids),
-                        "matched_rule_ids": matched_rule_ids,
-                    },
-                    "condition_checks": condition_checks,
-                }
-            )
-
-    return {
-        "schema_version": "1.0",
-        "description": "Incident threshold audit across scenario events",
-        "incident_count": len(incidents),
-        "incidents": incidents,
-    }
-
-
 async def _run_single_simulation(
     *,
     persona_path: Path,
@@ -365,17 +240,11 @@ async def _run_single_simulation(
     demo: bool,
     sim_config: dict,
     mqtt_config: dict,
-    rules_config_path: Path | str,
-    risk_config_path: Path | str,
-    timing_policy_path: Path | str,
 ) -> None:
     """Execute one persona+scenario run until completion or shutdown signal."""
     engine = ScenarioEngine(
         sim_config=sim_config,
         mqtt_config=mqtt_config,
-        rules_config_path=rules_config_path,
-        risk_config_path=risk_config_path,
-        timing_policy_path=timing_policy_path,
     )
     engine.load(persona_path=persona_path, scenario_path=scenario_path)
 
@@ -463,16 +332,6 @@ async def main() -> None:
         help="Path to YAML file containing persona+scenario runs to execute sequentially",
     )
     parser.add_argument(
-        "--incident-threshold-check",
-        action="store_true",
-        help="Check every scenario incident against rule thresholds and write a single report",
-    )
-    parser.add_argument(
-        "--incident-output",
-        default="config/incident_threshold_report.yaml",
-        help="Output path for --incident-threshold-check report",
-    )
-    parser.add_argument(
         "--personas-dir",
         default="personas",
         help="Directory containing persona YAML files (default: personas)",
@@ -494,34 +353,25 @@ async def main() -> None:
         help="Start the FastAPI demo control UI alongside the simulation",
     )
     parser.add_argument(
-        "--rules-config",
-        type=str,
-        default=None,
-        help="Path to rules configuration YAML file (default: config/rules_config.yaml)",
-    )
-    parser.add_argument(
-        "--risk-config",
-        type=str,
-        default=None,
-        help="Path to risk scoring configuration YAML file (default: config/risk_rules.yaml)",
-    )
-    parser.add_argument(
-        "--timing-policy",
-        type=str,
-        default=None,
-        help="Path to unified timing policy YAML (default: config/rule_timing_policy.yaml)",
+        "--population",
+        action="store_true",
+        help=(
+            "Start in population mode: empty fleet, no initial persona/scenario. "
+            "Use the demo API (/patients/add) to add patients dynamically. "
+            "Implies --demo."
+        ),
     )
     args = parser.parse_args()
 
-    if args.incident_threshold_check:
-        if args.demo:
-            parser.error("--demo is not supported with --incident-threshold-check")
+    # --population implies --demo and is exclusive with other modes
+    if args.population:
+        if args.persona or args.scenario:
+            parser.error("--persona/--scenario cannot be used with --population")
         if args.all_personas:
-            parser.error("--all-personas cannot be used with --incident-threshold-check")
-        if args.run_matrix and (args.persona or args.scenario):
-            parser.error("Use either --run-matrix or --persona/--scenario with --incident-threshold-check")
-        if (args.persona and not args.scenario) or (args.scenario and not args.persona):
-            parser.error("--persona and --scenario must be provided together")
+            parser.error("--all-personas cannot be used with --population")
+        if args.run_matrix:
+            parser.error("--run-matrix cannot be used with --population")
+        args.demo = True   # population mode always starts the demo API
     else:
         selected_modes = int(bool(args.all_personas)) + int(bool(args.run_matrix))
         if selected_modes > 1:
@@ -539,46 +389,18 @@ async def main() -> None:
                 parser.error("--persona/--scenario cannot be used with --run-matrix")
         else:
             if not args.persona or not args.scenario:
-                parser.error("--persona and --scenario are required unless --all-personas is set")
+                parser.error("--persona and --scenario are required unless --all-personas or --population is set")
 
     # Load config files
-    config_dir   = Path("config")
-    sim_config   = _load_yaml(config_dir / "simulator_config.yaml")
-    mqtt_config  = _load_yaml(config_dir / "mqtt_config.yaml")
+    config_dir  = Path("config")
+    sim_config  = _load_yaml(config_dir / "simulator_config.yaml")
+    mqtt_config = _load_yaml(config_dir / "mqtt_config.yaml")
 
-    rules_config_path = args.rules_config or config_dir / "rules_config.yaml"
-    risk_config_path = args.risk_config or config_dir / "risk_rules.yaml"
-    timing_policy_path = args.timing_policy or config_dir / "rule_timing_policy.yaml"
-
-    if args.incident_threshold_check:
-        if args.run_matrix:
-            run_plan = _load_run_matrix(Path(args.run_matrix))
-        elif args.persona and args.scenario:
-            run_plan = [(Path(args.persona), Path(args.scenario))]
-        else:
-            run_plan = _load_run_matrix(config_dir / "run_matrix.yaml")
-
-        report = _build_incident_threshold_report(
-            run_plan=run_plan,
-            rules_config_path=Path(rules_config_path),
+    if args.population:
+        await _run_population_mode(
+            sim_config=  sim_config,
+            mqtt_config= mqtt_config,
         )
-
-        output_path = Path(args.incident_output)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(
-            yaml.safe_dump(report, sort_keys=False),
-            encoding="utf-8",
-        )
-
-        logger.info(
-            "Incident threshold check completed",
-            extra={
-                "event": "incident_threshold_check_complete",
-                "report": str(output_path),
-                "incident_count": report["incident_count"],
-            },
-        )
-        print(f"Incident threshold report written to: {output_path}")
         return
 
     if args.all_personas:
@@ -613,9 +435,6 @@ async def main() -> None:
                     demo=False,
                     sim_config=sim_config,
                     mqtt_config=mqtt_config,
-                    rules_config_path=rules_config_path,
-                    risk_config_path=risk_config_path,
-                    timing_policy_path=timing_policy_path,
                 )
             except Exception as exc:
                 failure = (
@@ -666,9 +485,6 @@ async def main() -> None:
                 demo=True,
                 sim_config=sim_config,
                 mqtt_config=mqtt_config,
-                rules_config_path=rules_config_path,
-                risk_config_path=risk_config_path,
-                timing_policy_path=timing_policy_path,
             )
             return
 
@@ -691,9 +507,6 @@ async def main() -> None:
                     demo=False,
                     sim_config=sim_config,
                     mqtt_config=mqtt_config,
-                    rules_config_path=rules_config_path,
-                    risk_config_path=risk_config_path,
-                    timing_policy_path=timing_policy_path,
                 )
             except Exception as exc:
                 failure = (
@@ -719,10 +532,71 @@ async def main() -> None:
         demo=args.demo,
         sim_config=sim_config,
         mqtt_config=mqtt_config,
-        rules_config_path=rules_config_path,
-        risk_config_path=risk_config_path,
-        timing_policy_path=timing_policy_path,
     )
+
+
+async def _run_population_mode(
+    *,
+    sim_config: dict,
+    mqtt_config: dict,
+) -> None:
+    """Start the demo API with an empty fleet; patients are added dynamically."""
+    try:
+        import uvicorn
+        from demo.demo_api import create_app
+        from simulator.transport.mqtt_publisher import MQTTPublisher
+
+        publisher = MQTTPublisher(mqtt_config)
+        publisher.connect()
+
+        port = int(os.environ.get("DEMO_API_PORT", 8000))
+        app = create_app(
+            engine=None,
+            sim_config=      sim_config,
+            mqtt_config=     mqtt_config,
+            shared_publisher=publisher,
+        )
+
+        loop = asyncio.get_event_loop()
+        shutdown_event = asyncio.Event()
+
+        def _handle_signal():
+            logger.info("Shutdown signal received", extra={"event": "shutdown_signal"})
+            shutdown_event.set()
+
+        import platform
+        if platform.system() != "Windows":
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                loop.add_signal_handler(sig, _handle_signal)
+        else:
+            signal.signal(signal.SIGINT, lambda s, f: _handle_signal())
+
+        config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="warning")
+        server = uvicorn.Server(config)
+
+        logger.info(
+            "Population mode starting — fleet is empty, use /patients/add",
+            extra={"event": "population_mode_start", "port": port},
+        )
+
+        server_task = asyncio.create_task(server.serve())
+        shutdown_task = asyncio.create_task(shutdown_event.wait())
+        await asyncio.wait([server_task, shutdown_task], return_when=asyncio.FIRST_COMPLETED)
+
+        server.should_exit = True
+        publisher.stop()
+        logger.info("Population mode shutdown complete", extra={"event": "population_mode_shutdown"})
+
+    except ImportError:
+        logger.error(
+            "uvicorn not installed — population mode unavailable. Add uvicorn to requirements.txt.",
+            extra={"event": "population_mode_import_error"},
+        )
+    except Exception as exc:
+        logger.error(
+            "Population mode error",
+            extra={"event": "population_mode_error", "error": str(exc)},
+        )
 
 
 async def _start_demo_api(engine) -> None:

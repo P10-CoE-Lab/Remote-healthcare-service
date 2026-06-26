@@ -1,0 +1,9 @@
+SYSTEM HEALTH ALERT
+===================
+
+Service    : {{ payload.get('service', 'N/A') }}
+Status     : {{ payload.get('status', 'N/A') }}
+Region     : {{ payload.get('region', 'N/A') }}
+Checked At : {{ payload.get('checked_at', 'N/A') }}
+
+This is an automated notification. Do not reply.

@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: -apple-system, Arial, sans-serif; background: #f5f7fa; margin: 0; padding: 20px; color: #1e293b; }
+    .wrapper { max-width: 560px; margin: 0 auto; }
+    .header { padding: 20px 24px 16px; border-radius: 10px 10px 0 0; }
+    .header.critical  { background: #dc2626; }
+    .header.high      { background: #ea580c; }
+    .header.medium    { background: #d97706; }
+    .header.low       { background: #2563eb; }
+    .header.default   { background: #64748b; }
+    .header h1 { margin: 0; font-size: 18px; color: #fff; font-weight: 700; letter-spacing: -0.3px; }
+    .header p  { margin: 4px 0 0; font-size: 13px; color: rgba(255,255,255,0.85); }
+    .body { background: #fff; border: 1px solid #e2e8f0; border-top: 0; border-radius: 0 0 10px 10px; padding: 24px; }
+    .patient-badge {
+      display: inline-block;
+      background: #f1f5f9;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 15px;
+      font-weight: 600;
+      color: #1e293b;
+      margin-bottom: 20px;
+    }
+    .vitals-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+    .vital-card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 12px 14px;
+    }
+    .vital-card .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; font-weight: 600; margin-bottom: 4px; }
+    .vital-card .value { font-size: 22px; font-weight: 700; color: #0f172a; line-height: 1; }
+    .vital-card .unit  { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+    .vital-card.alert  { border-color: #fca5a5; background: #fff5f5; }
+    .vital-card.alert .value { color: #dc2626; }
+    .risk-bar { margin-bottom: 20px; }
+    .risk-bar .risk-label { font-size: 12px; color: #64748b; margin-bottom: 6px; font-weight: 600; }
+    .risk-track { background: #e2e8f0; border-radius: 4px; height: 8px; overflow: hidden; }
+    .risk-fill  { height: 100%; border-radius: 4px; transition: width 0.3s; }
+    .risk-fill.critical { background: #dc2626; }
+    .risk-fill.high     { background: #ea580c; }
+    .risk-fill.medium   { background: #d97706; }
+    .risk-fill.low      { background: #16a34a; }
+    .conditions { margin-bottom: 20px; }
+    .conditions .title { font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 8px; }
+    .conditions ul { margin: 0; padding: 0 0 0 16px; }
+    .conditions li { font-size: 13px; color: #334155; line-height: 1.6; }
+    .meta { border-top: 1px solid #f1f5f9; padding-top: 14px; font-size: 12px; color: #94a3b8; }
+    .meta span { display: inline-block; margin-right: 16px; }
+    .footer { margin-top: 16px; font-size: 11px; color: #94a3b8; text-align: center; }
+  </style>
+</head>
+<body>
+<div class="wrapper">
+
+  {# Determine header colour from risk_level, fall back to severity #}
+  {% set level = payload.risk_level if payload.risk_level in ('critical','high','medium','low') else 'default' %}
+
+  <div class="header {{ level }}">
+    <h1>{{ payload.description }}</h1>
+    <p>Healthcare monitoring alert &mdash; {{ payload.severity | upper }}</p>
+  </div>
+
+  <div class="body">
+
+    <div class="patient-badge">&#x1F4CB; {{ payload.patient_label }}</div>
+
+    <div class="vitals-grid">
+      <div class="vital-card alert">
+        <div class="label">{{ payload.sensor_name }}</div>
+        <div class="value">{{ payload.sensor_value }}</div>
+        <div class="unit">{{ payload.unit }} &nbsp;&bull;&nbsp; threshold {{ payload.threshold }} {{ payload.unit }}</div>
+      </div>
+      <div class="vital-card">
+        <div class="label">Risk Score</div>
+        <div class="value">{{ payload.risk_score | int }}</div>
+        <div class="unit">{{ payload.risk_level | upper }} risk level</div>
+      </div>
+    </div>
+
+    {% if payload.risk_score is defined %}
+    <div class="risk-bar">
+      <div class="risk-label">Risk Level &mdash; {{ payload.risk_score | int }}/100</div>
+      <div class="risk-track">
+        <div class="risk-fill {{ level }}" style="width: {{ [payload.risk_score, 100] | min }}%;"></div>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if payload.conditions_met %}
+    <div class="conditions">
+      <div class="title">Conditions detected</div>
+      <ul>
+        {% for c in payload.conditions_met %}
+        <li>{{ c }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    <div class="meta">
+      <span><strong>Source:</strong> {{ payload.source | upper }}</span>
+      <span><strong>Device:</strong> {{ payload.device_id }}</span>
+      {% if payload.timestamp_utc %}
+      <span><strong>Time:</strong> {{ payload.timestamp_utc[:19].replace('T', ' ') }} UTC</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="footer">Automated alert from Remote Healthcare Monitoring System &mdash; do not reply to this email.</div>
+</div>
+</body>
+</html>

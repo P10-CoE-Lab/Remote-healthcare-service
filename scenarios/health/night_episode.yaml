@@ -1,0 +1,99 @@
+# scenarios/health/night_episode.yaml
+# Normal nocturnal baseline, sudden SpO2 drop (sleep apnea pattern), recovery.
+
+schema_version: "1.0"
+scenario_id: night_episode
+description: "Nocturnal monitoring: stable sleep baseline, sudden SpO2 desaturation episode, recovery"
+persona: cardiac_patient
+poc_type: healthcare
+
+total_duration_minutes: 30
+compression: 10
+
+phases:
+  - name: sleep_stable
+    start_minute: 0
+    end_minute: 10
+    sensors:
+      heart_rate:
+        min: 52
+        max: 65
+        behavior: oscillating_stable    # HR naturally lower during sleep
+      spo2:
+        min: 96
+        max: 99
+        behavior: oscillating_stable
+      heart_rate_variability:
+        min: 45
+        max: 70
+        behavior: oscillating_stable    # HRV higher during restful sleep
+    noise_intensity: low
+
+  - name: apnea_onset
+    start_minute: 10
+    end_minute: 16
+    sensors:
+      heart_rate:
+        min: 58
+        max: 75
+        behavior: monotonic_rising     # bradycardia reflex then compensatory rise
+      spo2:
+        min: 88
+        max: 95
+        behavior: monotonic_falling    # rapid desaturation
+      heart_rate_variability:
+        min: 25
+        max: 48
+        behavior: monotonic_falling
+    noise_intensity: medium
+
+  - name: desaturation_nadir
+    start_minute: 16
+    end_minute: 22
+    sensors:
+      heart_rate:
+        min: 72
+        max: 90
+        behavior: mean_reverting
+      spo2:
+        min: 83
+        max: 90
+        behavior: mean_reverting
+      heart_rate_variability:
+        min: 18
+        max: 32
+        behavior: oscillating_stable
+    noise_intensity: high
+
+  - name: arousal_recovery
+    start_minute: 22
+    end_minute: 30
+    sensors:
+      heart_rate:
+        min: 60
+        max: 74
+        behavior: monotonic_falling
+      spo2:
+        min: 95
+        max: 98
+        behavior: monotonic_rising
+      heart_rate_variability:
+        min: 38
+        max: 60
+        behavior: monotonic_rising
+    noise_intensity: low
+
+events:
+  - at_minute: 13
+    type: low_spo2
+    description: "Nocturnal SpO2 drops sharply — possible apnea event"
+    overrides:
+      spo2: 85
+    duration_seconds: 60
+
+  - at_minute: 16
+    type: tachycardia_onset
+    description: "Compensatory HR rise as patient arouses from apnea"
+    overrides:
+      heart_rate: 88
+    duration_seconds: 30

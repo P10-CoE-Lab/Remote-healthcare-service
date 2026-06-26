@@ -1,0 +1,99 @@
+# scenarios/health/recovery_progression.yaml
+# Starts in alert state, gradually improves to stable. Shows recovery arc.
+
+schema_version: "1.0"
+scenario_id: recovery_progression
+description: "Patient starts in high-alert state and progressively stabilizes over 40 minutes"
+persona: post_surgery_recovery
+poc_type: healthcare
+
+total_duration_minutes: 40
+compression: 10
+
+phases:
+  - name: initial_alert
+    start_minute: 0
+    end_minute: 10
+    sensors:
+      heart_rate:
+        min: 108
+        max: 122
+        behavior: mean_reverting
+      spo2:
+        min: 88
+        max: 93
+        behavior: oscillating_stable
+      heart_rate_variability:
+        min: 10
+        max: 20
+        behavior: oscillating_stable
+    noise_intensity: high
+
+  - name: partial_stabilization
+    start_minute: 10
+    end_minute: 22
+    sensors:
+      heart_rate:
+        min: 92
+        max: 108
+        behavior: monotonic_falling
+      spo2:
+        min: 92
+        max: 96
+        behavior: monotonic_rising
+      heart_rate_variability:
+        min: 16
+        max: 30
+        behavior: monotonic_rising
+    noise_intensity: medium
+
+  - name: improving
+    start_minute: 22
+    end_minute: 32
+    sensors:
+      heart_rate:
+        min: 78
+        max: 92
+        behavior: monotonic_falling
+      spo2:
+        min: 95
+        max: 97
+        behavior: oscillating_stable
+      heart_rate_variability:
+        min: 25
+        max: 42
+        behavior: monotonic_rising
+    noise_intensity: medium
+
+  - name: stable
+    start_minute: 32
+    end_minute: 40
+    sensors:
+      heart_rate:
+        min: 66
+        max: 80
+        behavior: oscillating_stable
+      spo2:
+        min: 96
+        max: 98
+        behavior: oscillating_stable
+      heart_rate_variability:
+        min: 28
+        max: 48
+        behavior: oscillating_stable
+    noise_intensity: low
+
+events:
+  - at_minute: 0
+    type: tachycardia_onset
+    description: "Patient arrives in elevated state from exertion"
+    overrides:
+      heart_rate: 118
+    duration_seconds: 30
+
+  - at_minute: 2
+    type: low_spo2
+    description: "Initial SpO2 critically low at start of monitoring"
+    overrides:
+      spo2: 88
+    duration_seconds: 45

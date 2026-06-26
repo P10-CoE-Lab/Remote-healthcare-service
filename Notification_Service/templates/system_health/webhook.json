@@ -1,0 +1,1 @@
+{"event": "system_health", "service": "{{ payload.get('service', '') }}", "status": "{{ payload.get('status', '') }}", "region": "{{ payload.get('region', '') }}", "checked_at": "{{ payload.get('checked_at', '') }}"}

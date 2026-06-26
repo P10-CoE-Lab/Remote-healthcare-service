@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Type
 
 from simulator.sensors.base import BaseSensor
+from simulator.sensors.battery_sensor import BatterySensor
 from simulator.sensors.heart_rate_sensor import HeartRateSensor
 from simulator.sensors.hrv_sensor import HRVSensor
 from simulator.sensors.imu_sensor import IMUSensor
@@ -34,6 +35,7 @@ SENSOR_REGISTRY: dict[str, Type[BaseSensor]] = {
     "spo2":                   SpO2Sensor,
     "heart_rate_variability": HRVSensor,
     "posture_angle":          IMUSensor,     # also produces accel streams
+    "battery":                BatterySensor, # device-level, always present
 
     # Future sensors:
     # "ble_rssi":     BLESensor,

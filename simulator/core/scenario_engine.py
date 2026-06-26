@@ -32,15 +32,16 @@ from typing import Any, Callable, Awaitable
 
 from simulator.core.condition_mapper import ConditionMapper
 from simulator.core.persona_loader import Persona, load_persona, ConfigurationError
-from simulator.rules import load_rules_config, RulesConfig, get_default_rules_config
 from simulator.core.scenario_loader import (
     Phase, Scenario, ScenarioEvent, load_scenario,
 )
 from simulator.core.worker_context import WorkerContextProcessor
 from simulator.engine.correlation import CorrelationEngine
 from simulator.engine.fault import FaultController, FaultEvent
-from simulator.rules import RulesEngine
+from rule_engine.edge.config import load_edge_config
+from rule_engine.edge.engine import EdgeEngine
 from simulator.sensors.base import BaseSensor, SensorReading
+from simulator.sensors.battery_sensor import BatterySensor
 from simulator.sensors.heart_rate_sensor import HeartRateSensor
 from simulator.sensors.hrv_sensor import HRVSensor
 from simulator.sensors.imu_sensor import IMUSensor
@@ -72,6 +73,7 @@ class EngineStatus:
     events_fired:         list[str]
     sequence_number:      int
     available_events:     list[dict]
+    device_paused:        bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -93,12 +95,12 @@ class ScenarioEngine:
         self,
         sim_config:  dict[str, Any],
         mqtt_config: dict[str, Any],
-        rules_config_path: Path | str | None = None,
-        risk_config_path: Path | str | None = None,
-        timing_policy_path: Path | str | None = None,
+        edge_rules_path: Path | str | None = None,
+        instance_id: str = "001",
     ) -> None:
         self._sim_config   = sim_config
         self._mqtt_config  = mqtt_config
+        self._instance_id  = instance_id
 
         self._persona:   Persona | None   = None
         self._scenario:  Scenario | None  = None
@@ -107,13 +109,11 @@ class ScenarioEngine:
         self._correlation = CorrelationEngine()
         self._fault_ctrl  = FaultController()
         self._threshold_multiplier: float = 1.0
-        
-        # Rules engine
-        self._rules_config: RulesConfig | None = None
-        self._rules_engine: RulesEngine | None = None
-        self._rules_config_path = rules_config_path or Path("config/rules_config.yaml")
-        self._risk_config_path = risk_config_path or Path("config/risk_rules.yaml")
-        self._timing_policy_path = timing_policy_path or Path("config/rule_timing_policy.yaml")
+
+        # Edge rule engine — evaluates rules directly from sensor readings
+        edge_path = Path(edge_rules_path or "config/edge_rules.yaml")
+        edge_config = load_edge_config(edge_path)
+        self._edge_engine = EdgeEngine(edge_config, mqtt_config)
 
         # Runtime state
         self._running:            bool  = False
@@ -127,6 +127,12 @@ class ScenarioEngine:
 
         # Sensor generators (built at load time)
         self._sensors: list[BaseSensor] = []
+
+        # Battery sensor — device-level, always present
+        self._battery_sensor: BatterySensor | None = None
+
+        # Device paused state — set by battery_dead event, cleared by restart_device
+        self._device_paused: bool = False
 
         # Task handles
         self._tasks: list[asyncio.Task] = []
@@ -204,10 +210,8 @@ class ScenarioEngine:
                 ]
             )
 
-        # Load rules configuration
-        self._load_rules_config()
-        if self._rules_engine:
-            self._rules_engine.reset_runtime_state()
+        # Reset edge engine state for this scenario
+        self._edge_engine.reset()
 
         # Reset state
         self._fault_ctrl  = FaultController()
@@ -218,6 +222,7 @@ class ScenarioEngine:
         self._events_fired          = []
         self._pending_events        = list(self._scenario.events)
         self._active_overrides      = {}
+        self._device_paused         = False
 
         # Build sensors for first phase
         self._sensors = self._build_sensors(self._scenario.phases[0])
@@ -250,10 +255,6 @@ class ScenarioEngine:
 
         self._publish_callback = publish_callback
         self._spawn_tasks()
-        
-        # Start rules engine if configured
-        if self._rules_engine:
-            await self._rules_engine.start()
 
         logger.info(
             "ScenarioEngine starting",
@@ -284,9 +285,6 @@ class ScenarioEngine:
             await self.stop()
         self.load(persona_path, scenario_path)
         self._spawn_tasks()
-        # Restart the rules engine for the new scenario
-        if self._rules_engine:
-            asyncio.create_task(self._rules_engine.start())
         logger.info(
             "ScenarioEngine reloaded",
             extra={
@@ -317,11 +315,6 @@ class ScenarioEngine:
     async def stop(self) -> None:
         """Gracefully stop the simulation."""
         self._running = False
-        
-        # Stop rules engine
-        if self._rules_engine:
-            await self._rules_engine.stop()
-            
         tasks = [t for t in self._tasks if not t.done()]
         self._tasks = []
         for task in tasks:
@@ -337,10 +330,16 @@ class ScenarioEngine:
         """
         Manually fire a named event immediately (from demo API).
 
-        Returns True if the event type exists in the current scenario,
-        False if not found (so the API can return a 404).
-        duration_seconds overrides the event's YAML-defined duration when provided.
+        Battery events (battery_dead, restart_device) are always available.
+        All other events must exist in the current scenario YAML.
+
+        Returns True if the event was queued, False if not found.
         """
+        # Battery events are device-level — always available
+        if event_type in ("battery_dead", "restart_device"):
+            self._manual_event_queue.put_nowait((event_type, duration_seconds))
+            return True
+
         if self._scenario is None:
             return False
         matched = any(e.event_type == event_type for e in self._scenario.events)
@@ -364,10 +363,22 @@ class ScenarioEngine:
         if self._scenario and self._current_phase_idx < len(self._scenario.phases):
             phase_name = self._scenario.phases[self._current_phase_idx].name
 
-        available = [
+        # Battery events are device-level and always available regardless of scenario.
+        battery_events = [
+            {
+                "type":        "battery_dead",
+                "description": "Simulate device battery failure — card shows Disconnected",
+            },
+            {
+                "type":        "restart_device",
+                "description": "Restore battery and reconnect device",
+            },
+        ]
+        scenario_events = [
             {"type": e.event_type, "description": e.description}
             for e in self._scenario.events
         ] if self._scenario else []
+        available = battery_events + scenario_events
 
         return EngineStatus(
             running=             self._running,
@@ -380,6 +391,7 @@ class ScenarioEngine:
             events_fired=        list(self._events_fired),
             sequence_number=     self._sequence_number,
             available_events=    available,
+            device_paused=       self._device_paused,
         )
 
     # ------------------------------------------------------------------
@@ -469,6 +481,11 @@ class ScenarioEngine:
 
     async def _tick_sensor(self, sensor: BaseSensor) -> None:
         """Execute one tick for a sensor and publish the reading."""
+        # When the device is paused (battery dead), stop publishing vitals.
+        # Battery sensor still ticks so it publishes the 0% value on MQTT.
+        if self._device_paused and not isinstance(sensor, BatterySensor):
+            return
+
         phase = self._scenario.phases[self._current_phase_idx]
         phase_progress = self._compressor.phase_progress(
             (self._elapsed_sim_seconds - self._phase_entry_sim_seconds) / 60.0,
@@ -502,7 +519,7 @@ class ScenarioEngine:
 
         self._sequence_number += 1
 
-        device_id = f"sim-{self._persona.persona_id}-001"
+        device_id = f"sim-{self._persona.persona_id}-{self._instance_id}"
         await self._publish_callback(
             reading,
             self._persona.persona_id,
@@ -510,14 +527,13 @@ class ScenarioEngine:
             device_id,
         )
         
-        # Feed sensor reading to rules engine
-        if self._rules_engine:
-            self._rules_engine.process_sensor_reading(
-                reading,
-                self._persona.persona_id,
-                self._persona.poc_type,
-                device_id,
-            )
+        # Feed sensor reading to edge engine
+        self._edge_engine.process_reading(
+            reading,
+            self._persona.persona_id,
+            self._persona.poc_type,
+            device_id,
+        )
 
         # Publish derived streams from IMU
         if isinstance(sensor, IMUSensor) and reading.extra:
@@ -539,14 +555,13 @@ class ScenarioEngine:
                     device_id,
                 )
                 
-                # Feed extra readings to rules engine too
-                if self._rules_engine:
-                    self._rules_engine.process_sensor_reading(
-                        extra_reading,
-                        self._persona.persona_id,
-                        self._persona.poc_type,
-                        device_id,
-                    )
+                # Feed extra readings to edge engine too
+                self._edge_engine.process_reading(
+                    extra_reading,
+                    self._persona.persona_id,
+                    self._persona.poc_type,
+                    device_id,
+                )
 
     # ------------------------------------------------------------------
     # Phase management
@@ -662,7 +677,36 @@ class ScenarioEngine:
                 event_type, duration_override = await asyncio.wait_for(
                     self._manual_event_queue.get(), timeout=1.0
                 )
-                # Find the first matching event in the scenario
+
+                # ── Battery events are device-level, handled here directly ──
+                if event_type == "battery_dead":
+                    self._device_paused = True
+                    # Keep battery override at 0% for a very long time (operator
+                    # clears it via restart_device).
+                    end_real = time.monotonic() + 86_400.0
+                    self._active_overrides["battery"] = (0.0, end_real)
+                    self._events_fired.append(event_type)
+                    logger.info(
+                        "Battery dead — device paused",
+                        extra={"event": "battery_dead"},
+                    )
+                    continue
+
+                if event_type == "restart_device":
+                    self._device_paused = False
+                    self._active_overrides.pop("battery", None)
+                    for sensor in self._sensors:
+                        if isinstance(sensor, BatterySensor):
+                            sensor.restore(85.0)
+                            break
+                    self._events_fired.append(event_type)
+                    logger.info(
+                        "Device restarted — battery restored",
+                        extra={"event": "restart_device"},
+                    )
+                    continue
+
+                # ── Regular scenario events ──
                 matched = next(
                     (e for e in self._scenario.events if e.event_type == event_type),
                     None,
@@ -759,131 +803,22 @@ class ScenarioEngine:
                     threshold_multiplier= self._threshold_multiplier,
                 ))
 
+        # Battery is always present — device-level, not physiological.
+        # Create a fresh instance on every load so the level resets for demos.
+        battery = BatterySensor()
+        self._battery_sensor = battery
+        sensors.append(battery)
+
         return sensors
     
     # ------------------------------------------------------------------
-    # Rules engine integration
+    # Edge engine integration
     # ------------------------------------------------------------------
-    
-    def _load_rules_config(self) -> None:
-        """Load rules configuration and initialize rules engine."""
-        try:
-            # Try to load rules config
-            if Path(self._rules_config_path).exists():
-                self._rules_config = load_rules_config(self._rules_config_path)
-                logger.info(
-                    "Rules config loaded",
-                    extra={
-                        "event": "rules_config_loaded",
-                        "path": str(self._rules_config_path),
-                        "rules_count": len(self._rules_config.rules)
-                    }
-                )
-            else:
-                # Use default empty config
-                self._rules_config = get_default_rules_config()
-                logger.info(
-                    "No rules config found, using defaults",
-                    extra={
-                        "event": "rules_config_default",
-                        "path": str(self._rules_config_path)
-                    }
-                )
-            
-            # Initialize rules engine (will be started when scenario starts)
-            if self._rules_config.rules:
-                # We'll pass the MQTT publisher when we have it
-                self._rules_engine = RulesEngine(
-                    config=self._rules_config,
-                    mqtt_publisher=None,  # Will be set later
-                    scenario_engine=self,
-                    risk_config_path=self._risk_config_path,
-                    timing_policy_path=self._timing_policy_path,
-                )
-        except Exception as e:
-            logger.warning(
-                "Failed to load rules config",
-                extra={
-                    "event": "rules_config_error",
-                    "path": str(self._rules_config_path),
-                    "error": str(e)
-                }
-            )
-            # Continue without rules engine
-            self._rules_config = get_default_rules_config()
-            self._rules_engine = None
-    
+
     def set_mqtt_publisher(self, mqtt_publisher: Any) -> None:
-        """Set the MQTT publisher for the rules engine."""
-        if self._rules_engine:
-            self._rules_engine._mqtt_publisher = mqtt_publisher
-    
-    async def trigger_manual_event(self, event_name: str, duration: float | None = None) -> bool:
-        """
-        Trigger a manual event (used by rules engine).
-        
-        Args:
-            event_name: Name of the event to trigger.
-            duration: Optional duration override.
-            
-        Returns:
-            True if event was queued successfully.
-        """
-        try:
-            await self._manual_event_queue.put((event_name, duration))
-            return True
-        except Exception as e:
-            logger.error(
-                "Failed to trigger manual event",
-                extra={
-                    "event": "manual_event_error",
-                    "event_name": event_name,
-                    "error": str(e)
-                }
-            )
-            return False
-    
-    def get_rules_status(self) -> dict[str, Any]:
-        """Get current rules engine status."""
-        if not self._rules_engine:
-            return {
-                "enabled": False,
-                "message": "Rules engine not configured"
-            }
-        
-        status = {
-            "enabled": True,
-            **self._rules_engine.get_status(),
-            "risk_rules": self._rules_engine.get_configured_risk_rules(),
-        }
-        return status
+        """Provide the MQTT publisher so the edge engine can transmit alerts."""
+        self._edge_engine.set_mqtt_publisher(mqtt_publisher)
 
-    def get_risk_status(self) -> dict[str, Any]:
-        """Get current risk scoring status (R1-R10)."""
-        if not self._rules_engine:
-            return {
-                "enabled": False,
-                "message": "Rules engine not configured"
-            }
-        return self._rules_engine.get_risk_status()
-
-    def get_configured_risk_rules(self) -> list[dict[str, Any]]:
-        """Get all configured risk rules with their metadata."""
-        if not self._rules_engine:
-            return []
-        return self._rules_engine.get_configured_risk_rules()
-
-    def get_recent_risk_snapshots(self, limit: int = 20) -> list[dict[str, Any]]:
-        """Get recent risk snapshots for dashboard/troubleshooting."""
-        if not self._rules_engine:
-            return []
-        return self._rules_engine.get_recent_risk_snapshots(limit=limit)
-
-    def update_risk_context(self, context: dict[str, Any]) -> dict[str, Any]:
-        """Update risk context payload (zone/machine/PPE/location/shift)."""
-        if not self._rules_engine:
-            return {
-                "enabled": False,
-                "message": "Rules engine not configured"
-            }
-        return self._rules_engine.update_risk_context(context)
+    def get_edge_alerts(self, limit: int = 30) -> list[dict[str, Any]]:
+        """Return recent edge alerts — delegated to EdgeEngine direct memory read."""
+        return self._edge_engine.get_recent_alerts(limit=limit)

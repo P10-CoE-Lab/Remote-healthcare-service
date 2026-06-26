@@ -1,0 +1,48 @@
+# personas/diabetic_cardiac.yaml
+# Persona: Female, 67 years old, diabetes + cardiac comorbidity, SpO2 drops quickly.
+
+schema_version: "1.0"
+persona_id: diabetic_cardiac
+description: "Female, 67 years old, Type 2 diabetes with cardiac comorbidity, SpO2 drops rapidly"
+poc_type: healthcare
+
+baseline:
+  heart_rate:
+    min: 68
+    max: 85
+    unit: bpm
+    sampling_interval_ms: 1000
+
+  spo2:
+    min: 94
+    max: 97
+    unit: percent
+    sampling_interval_ms: 2000
+
+  heart_rate_variability:
+    min: 15
+    max: 32
+    unit: ms
+    sampling_interval_ms: 5000
+
+thresholds:
+  heart_rate_high: 108       # bpm — diabetic autonomic neuropathy raises risk at lower HR
+  heart_rate_low: 50         # bpm — bradycardia boundary
+  spo2_low: 91               # percent — baseline is already lower; alarm at deeper drop
+  hrv_low: 10                # ms — diabetic autonomic neuropathy causes very low HRV
+
+noise_profile:
+  heart_rate:             gaussian
+  spo2:                   quantization
+  heart_rate_variability: drift          # autonomic neuropathy causes slow HRV drift
+
+correlations:
+  - leader_sensor: heart_rate
+    follower_sensor: spo2
+    coupling_strength: -0.5    # diabetes impairs vascular compensation; SpO2 drops fast
+    lag_seconds: 20
+
+  - leader_sensor: heart_rate
+    follower_sensor: heart_rate_variability
+    coupling_strength: -0.4
+    lag_seconds: 10

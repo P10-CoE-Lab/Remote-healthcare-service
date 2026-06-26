@@ -1,0 +1,1 @@
+Alert: {{ payload.sensor_id }} = {{ payload.value }}{{ payload.unit }} (threshold: {{ payload.threshold }}{{ payload.unit }})

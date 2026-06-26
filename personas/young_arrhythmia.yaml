@@ -1,0 +1,48 @@
+# personas/young_arrhythmia.yaml
+# Persona: Female, 34 years old, known arrhythmia, low HRV baseline.
+
+schema_version: "1.0"
+persona_id: young_arrhythmia
+description: "Female, 34 years old, known paroxysmal arrhythmia, low baseline HRV"
+poc_type: healthcare
+
+baseline:
+  heart_rate:
+    min: 60
+    max: 78
+    unit: bpm
+    sampling_interval_ms: 1000
+
+  spo2:
+    min: 97
+    max: 99
+    unit: percent
+    sampling_interval_ms: 2000
+
+  heart_rate_variability:
+    min: 18
+    max: 35
+    unit: ms
+    sampling_interval_ms: 5000
+
+thresholds:
+  heart_rate_high: 130       # bpm — arrhythmia episodes can spike sharply
+  heart_rate_low: 45         # bpm — her resting HR can dip low between episodes
+  spo2_low: 94               # percent — young and otherwise healthy, strict threshold
+  hrv_low: 12                # ms — baseline already low; alarm fires at very low HRV
+
+noise_profile:
+  heart_rate:             burst          # arrhythmia causes irregular HR noise pattern
+  spo2:                   quantization
+  heart_rate_variability: gaussian
+
+correlations:
+  - leader_sensor: heart_rate
+    follower_sensor: heart_rate_variability
+    coupling_strength: -0.6    # strong: arrhythmia episodes crater HRV
+    lag_seconds: 5
+
+  - leader_sensor: heart_rate
+    follower_sensor: spo2
+    coupling_strength: -0.2
+    lag_seconds: 30

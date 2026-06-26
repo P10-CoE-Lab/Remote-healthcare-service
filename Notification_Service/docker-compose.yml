@@ -1,0 +1,20 @@
+services:
+  notification-service:
+    build: .
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./templates:/app/templates:ro
+      - ./notification-config.yaml:/app/notification-config.yaml:ro
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    depends_on:
+      - mailhog
+    restart: unless-stopped
+
+  mailhog:
+    image: mailhog/mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"

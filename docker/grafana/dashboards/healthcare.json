@@ -1,183 +1,123 @@
 {
-  "title": "Healthcare \u2014 Remote Patient Monitor",
+  "title": "Healthcare — Remote Patient Monitor",
   "uid": "healthcare-001",
   "schemaVersion": 38,
-  "version": 1,
-  "refresh": "2s",
-  "time": {
-    "from": "now-5m",
-    "to": "now"
+  "version": 2,
+  "refresh": "5s",
+  "time": { "from": "now-5m", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "device_id",
+        "label": "Patient Device",
+        "type": "query",
+        "datasource": { "type": "influxdb", "uid": "influxdb-vitals" },
+        "query": "import \"influxdata/influxdb/schema\"\nschema.tagValues(\n  bucket: \"iot_poc\",\n  tag: \"device_id\",\n  predicate: (r) => r[\"_measurement\"] == \"vitals\",\n  start: -5m\n)",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "allValue": "",
+        "sort": 1,
+        "hide": 0
+      }
+    ]
   },
   "panels": [
     {
       "id": 1,
-      "title": "Heart Rate (bpm)",
+      "title": "Alert Timeline",
       "type": "timeseries",
-      "gridPos": {
-        "x": 0,
-        "y": 0,
-        "w": 12,
-        "h": 8
-      },
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 5 },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "fixed",
-            "fixedColor": "#f87171"
-          },
-          "unit": "none",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 50
-              },
-              {
-                "color": "yellow",
-                "value": 90
-              },
-              {
-                "color": "red",
-                "value": 100
-              }
-            ]
-          },
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 10
-          }
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 0, "fillOpacity": 80, "drawStyle": "bars", "barAlignment": 0 }
         }
       },
       "targets": [
         {
-          "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-vitals"
-          },
-          "query": "from(bucket: \"iot_poc\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"vitals\")\n  |> filter(fn: (r) => r[\"sensor_name\"] == \"heart_rate\")\n  |> filter(fn: (r) => r[\"poc_type\"] == \"healthcare\")\n  |> filter(fn: (r) => r[\"_field\"] == \"value\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)",
+          "datasource": { "type": "influxdb", "uid": "influxdb-vitals" },
+          "query": "from(bucket: \"iot_poc\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"rule_alerts\")\n  |> filter(fn: (r) => r[\"_field\"] == \"risk_score\")\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)",
           "refId": "A"
         }
       ]
     },
     {
-      "id": 2,
-      "title": "SpO2 \u2014 Blood Oxygen (%)",
+      "id": 10,
+      "title": "$device_id",
+      "type": "row",
+      "gridPos": { "x": 0, "y": 6, "w": 24, "h": 1 },
+      "collapsed": false,
+      "repeat": "device_id",
+      "repeatDirection": "v"
+    },
+    {
+      "id": 11,
+      "title": "Heart Rate — $device_id",
       "type": "timeseries",
-      "gridPos": {
-        "x": 12,
-        "y": 0,
-        "w": 12,
-        "h": 8
-      },
+      "gridPos": { "x": 0, "y": 7, "w": 12, "h": 7 },
+      "repeatRowWith": "device_id",
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "fixed",
-            "fixedColor": "#38bdf8"
+          "color": { "mode": "fixed", "fixedColor": "#f87171" },
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 50 },
+              { "color": "yellow", "value": 90 },
+              { "color": "red", "value": 100 }
+            ]
           },
+          "custom": { "lineWidth": 2, "fillOpacity": 10 }
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-vitals" },
+          "query": "from(bucket: \"iot_poc\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"vitals\")\n  |> filter(fn: (r) => r[\"sensor_name\"] == \"heart_rate\")\n  |> filter(fn: (r) => r[\"device_id\"] == \"${device_id}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"value\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "SpO₂ — $device_id",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 7, "w": 12, "h": 7 },
+      "repeatRowWith": "device_id",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "#38bdf8" },
           "unit": "percent",
           "min": 85,
           "max": 100,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 93
-              },
-              {
-                "color": "green",
-                "value": 96
-              }
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 93 },
+              { "color": "green", "value": 96 }
             ]
           },
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 15
-          }
+          "custom": { "lineWidth": 2, "fillOpacity": 15 }
         }
       },
       "targets": [
         {
-          "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-vitals"
-          },
-          "query": "from(bucket: \"iot_poc\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"vitals\")\n  |> filter(fn: (r) => r[\"sensor_name\"] == \"spo2\")\n  |> filter(fn: (r) => r[\"poc_type\"] == \"healthcare\")\n  |> filter(fn: (r) => r[\"_field\"] == \"value\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)",
+          "datasource": { "type": "influxdb", "uid": "influxdb-vitals" },
+          "query": "from(bucket: \"iot_poc\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"vitals\")\n  |> filter(fn: (r) => r[\"sensor_name\"] == \"spo2\")\n  |> filter(fn: (r) => r[\"device_id\"] == \"${device_id}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"value\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)",
           "refId": "A"
         }
       ]
     },
     {
-      "id": 3,
-      "title": "Heart Rate Variability \u2014 HRV (ms)",
-      "type": "timeseries",
-      "gridPos": {
-        "x": 0,
-        "y": 8,
-        "w": 12,
-        "h": 8
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "fixed",
-            "fixedColor": "#a78bfa"
-          },
-          "unit": "ms",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 20
-              },
-              {
-                "color": "green",
-                "value": 30
-              }
-            ]
-          },
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 10
-          }
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-vitals"
-          },
-          "query": "from(bucket: \"iot_poc\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"vitals\")\n  |> filter(fn: (r) => r[\"sensor_name\"] == \"heart_rate_variability\")\n  |> filter(fn: (r) => r[\"poc_type\"] == \"healthcare\")\n  |> filter(fn: (r) => r[\"_field\"] == \"value\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 4,
-      "title": "Current HR (live)",
+      "id": 13,
+      "title": "HR (live) — $device_id",
       "type": "gauge",
-      "gridPos": {
-        "x": 12,
-        "y": 8,
-        "w": 6,
-        "h": 8
-      },
+      "gridPos": { "x": 0, "y": 14, "w": 6, "h": 5 },
+      "repeatRowWith": "device_id",
       "fieldConfig": {
         "defaults": {
           "unit": "none",
@@ -186,47 +126,28 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 50
-              },
-              {
-                "color": "yellow",
-                "value": 90
-              },
-              {
-                "color": "red",
-                "value": 100
-              }
+              { "color": "red", "value": null },
+              { "color": "green", "value": 50 },
+              { "color": "yellow", "value": 90 },
+              { "color": "red", "value": 100 }
             ]
           }
         }
       },
       "targets": [
         {
-          "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-vitals"
-          },
-          "query": "from(bucket: \"iot_poc\")\n  |> range(start: -10s)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"vitals\")\n  |> filter(fn: (r) => r[\"sensor_name\"] == \"heart_rate\")\n  |> filter(fn: (r) => r[\"poc_type\"] == \"healthcare\")\n  |> filter(fn: (r) => r[\"_field\"] == \"value\")\n  |> last()",
+          "datasource": { "type": "influxdb", "uid": "influxdb-vitals" },
+          "query": "from(bucket: \"iot_poc\")\n  |> range(start: -15s)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"vitals\")\n  |> filter(fn: (r) => r[\"sensor_name\"] == \"heart_rate\")\n  |> filter(fn: (r) => r[\"device_id\"] == \"${device_id}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"value\")\n  |> last()",
           "refId": "A"
         }
       ]
     },
     {
-      "id": 5,
-      "title": "Current SpO2 (live)",
+      "id": 14,
+      "title": "SpO₂ (live) — $device_id",
       "type": "gauge",
-      "gridPos": {
-        "x": 18,
-        "y": 8,
-        "w": 6,
-        "h": 8
-      },
+      "gridPos": { "x": 6, "y": 14, "w": 6, "h": 5 },
+      "repeatRowWith": "device_id",
       "fieldConfig": {
         "defaults": {
           "unit": "percent",
@@ -235,42 +156,77 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 93
-              },
-              {
-                "color": "green",
-                "value": 96
-              }
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 93 },
+              { "color": "green", "value": 96 }
             ]
           }
         }
       },
       "targets": [
         {
-          "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-vitals"
-          },
-          "query": "from(bucket: \"iot_poc\")\n  |> range(start: -10s)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"vitals\")\n  |> filter(fn: (r) => r[\"sensor_name\"] == \"spo2\")\n  |> filter(fn: (r) => r[\"poc_type\"] == \"healthcare\")\n  |> filter(fn: (r) => r[\"_field\"] == \"value\")\n  |> last()",
+          "datasource": { "type": "influxdb", "uid": "influxdb-vitals" },
+          "query": "from(bucket: \"iot_poc\")\n  |> range(start: -15s)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"vitals\")\n  |> filter(fn: (r) => r[\"sensor_name\"] == \"spo2\")\n  |> filter(fn: (r) => r[\"device_id\"] == \"${device_id}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"value\")\n  |> last()",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "title": "HRV (live) — $device_id",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 14, "w": 6, "h": 5 },
+      "repeatRowWith": "device_id",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 20 },
+              { "color": "green", "value": 30 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-vitals" },
+          "query": "from(bucket: \"iot_poc\")\n  |> range(start: -15s)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"vitals\")\n  |> filter(fn: (r) => r[\"sensor_name\"] == \"heart_rate_variability\")\n  |> filter(fn: (r) => r[\"device_id\"] == \"${device_id}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"value\")\n  |> last()",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "title": "Risk Score — $device_id",
+      "type": "stat",
+      "gridPos": { "x": 18, "y": 14, "w": 6, "h": 5 },
+      "repeatRowWith": "device_id",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 30 },
+              { "color": "orange", "value": 60 },
+              { "color": "red", "value": 80 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-vitals" },
+          "query": "from(bucket: \"iot_poc\")\n  |> range(start: -2m)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"rule_alerts\")\n  |> filter(fn: (r) => r[\"device_id\"] == \"${device_id}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"risk_score\")\n  |> last()",
           "refId": "A"
         }
       ]
     }
-  ],
-  "templating": {
-    "list": [
-      {
-        "name": "DS_INFLUXDB",
-        "type": "datasource",
-        "pluginId": "influxdb",
-        "hide": 2
-      }
-    ]
-  }
+  ]
 }

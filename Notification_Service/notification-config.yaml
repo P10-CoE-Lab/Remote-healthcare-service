@@ -1,0 +1,55 @@
+providers:
+  email:
+    default: mailhog     # switch to gmail for production
+    fallback: null
+  sms:
+    default: twilio
+    fallback: null
+  webhook:
+    default: generic
+    fallback: null
+
+profiles:
+  # ── Healthcare monitoring alerts ──────────────────────────────────────────
+  health_alert:
+    rules:
+      - condition: "payload.severity == 'emergency' or payload.risk_level == 'critical'"
+        channels: [email]
+        priority: critical
+      - condition: "payload.severity == 'critical' or payload.risk_level == 'high'"
+        channels: [email]
+        priority: high
+      - condition: "payload.severity == 'warning' or payload.risk_level == 'medium'"
+        channels: [email]
+        priority: medium
+      - default: true
+        channels: [email]
+        priority: low
+
+  # ── Generic sensor threshold alert (kept for other use cases) ────────────
+  sensor_alert:
+    rules:
+      - condition: "payload.value > 90"
+        channels: [email, sms, webhook]
+        priority: critical
+      - condition: "payload.value > 70"
+        channels: [email, sms]
+        priority: high
+      - default: true
+        channels: [email]
+        priority: medium
+
+  maintenance_report:
+    rules:
+      - default: true
+        channels: [email]
+        priority: medium
+
+  system_health:
+    rules:
+      - condition: "payload.status == 'down'"
+        channels: [email, sms, webhook]
+        priority: critical
+      - default: true
+        channels: [webhook]
+        priority: low

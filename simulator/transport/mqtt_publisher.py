@@ -123,11 +123,13 @@ class MQTTPublisher:
 
     def publish(
         self,
-        reading:       SensorReading,
-        persona_id:    str,
-        poc_type:      str,
-        device_id:     str,
-        sequence_num:  int = 0,
+        reading:        SensorReading,
+        persona_id:     str,
+        poc_type:       str,
+        device_id:      str,
+        sequence_num:   int = 0,
+        compression:    float = 1.0,
+        patient_label:  str = "",
     ) -> None:
         """
         Publish a SensorReading to the broker.
@@ -139,7 +141,7 @@ class MQTTPublisher:
         """
         topic = f"{self._prefix}/{poc_type}/{persona_id}/{reading.sensor_name}"
 
-        payload = self._build_payload(reading, persona_id, poc_type, device_id, sequence_num)
+        payload = self._build_payload(reading, persona_id, poc_type, device_id, sequence_num, compression, patient_label)
 
         try:
             result = self._client.publish(
@@ -165,16 +167,19 @@ class MQTTPublisher:
 
     def _build_payload(
         self,
-        reading:      SensorReading,
-        persona_id:   str,
-        poc_type:     str,
-        device_id:    str,
-        sequence_num: int,
+        reading:        SensorReading,
+        persona_id:     str,
+        poc_type:       str,
+        device_id:      str,
+        sequence_num:   int,
+        compression:    float = 1.0,
+        patient_label:  str = "",
     ) -> dict[str, Any]:
         """Construct the MQTT payload dict following the defined schema."""
         return {
             "timestamp_utc":   datetime.now(tz=timezone.utc).isoformat(),
             "device_id":       device_id,
+            "patient_label":   patient_label or device_id,
             "persona_id":      persona_id,
             "poc_type":        poc_type,
             "sensor_name":     reading.sensor_name,
@@ -185,6 +190,7 @@ class MQTTPublisher:
             "quality":         reading.quality,
             "fault_active":    reading.fault_active,
             "sequence_number": sequence_num,
+            "compression":     compression,
         }
 
     def publish_raw(self, topic: str, payload: str, qos: int = None, retain: bool = None) -> None:

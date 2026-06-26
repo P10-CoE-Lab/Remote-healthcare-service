@@ -1,0 +1,140 @@
+{
+  "title": "Healthcare — Fleet Overview",
+  "uid": "healthcare-overview",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-5m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Heart Rate — All Patients",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": { "lineWidth": 2, "fillOpacity": 0 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 90 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-vitals" },
+          "query": "from(bucket: \"iot_poc\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"vitals\")\n  |> filter(fn: (r) => r[\"poc_type\"] == \"healthcare\")\n  |> filter(fn: (r) => r[\"sensor_name\"] == \"heart_rate\")\n  |> filter(fn: (r) => r[\"_field\"] == \"value\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({r with _field: r.patient_label}))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "SpO₂ — All Patients",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 8, "w": 24, "h": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 85,
+          "max": 100,
+          "custom": { "lineWidth": 2, "fillOpacity": 0 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 93 },
+              { "color": "green", "value": 96 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-vitals" },
+          "query": "from(bucket: \"iot_poc\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"vitals\")\n  |> filter(fn: (r) => r[\"poc_type\"] == \"healthcare\")\n  |> filter(fn: (r) => r[\"sensor_name\"] == \"spo2\")\n  |> filter(fn: (r) => r[\"_field\"] == \"value\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({r with _field: r.patient_label}))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "HRV — All Patients",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 16, "w": 24, "h": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "lineWidth": 2, "fillOpacity": 0 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 20 },
+              { "color": "green", "value": 30 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-vitals" },
+          "query": "from(bucket: \"iot_poc\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"vitals\")\n  |> filter(fn: (r) => r[\"poc_type\"] == \"healthcare\")\n  |> filter(fn: (r) => r[\"sensor_name\"] == \"heart_rate_variability\")\n  |> filter(fn: (r) => r[\"_field\"] == \"value\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({r with _field: r.patient_label}))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Risk Score — All Patients",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 24, "w": 24, "h": 6 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "max": 100,
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "drawStyle": "bars", "barAlignment": 0 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 30 },
+              { "color": "orange", "value": 60 },
+              { "color": "red", "value": 80 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-vitals" },
+          "query": "from(bucket: \"iot_poc\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"rule_alerts\")\n  |> filter(fn: (r) => r[\"_field\"] == \"risk_score\")\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> map(fn: (r) => ({r with _field: r.device_id}))",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}
