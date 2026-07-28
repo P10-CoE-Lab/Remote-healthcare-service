@@ -47,6 +47,7 @@ export function OperatorView() {
       {modalOpen && (
         <AddPatientModal
           currentCount={patients.length}
+          hasHardwarePatient={patients.some((p) => p.source === 'hardware')}
           onClose={() => setModalOpen(false)}
         />
       )}

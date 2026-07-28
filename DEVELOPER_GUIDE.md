@@ -418,6 +418,42 @@ iots/healthcare/{patient_id}/alerts          ← alert messages from rule engine
 `condition`: `normal` | `warning` | `critical`  
 `quality`: `good` | `uncertain` | `bad`
 
+### Real hardware devices
+
+Two physical ESP32 devices publish this exact contract directly — no Python
+bridge/adapter service. Both are still `poc_type: healthcare`.
+
+| Device | `device_id` | `persona_id` | Notes |
+|---|---|---|---|
+| Cardiac patient sim | `hw-cardiac-01` | `cardiac_patient` | Scripted playback of `scenarios/health/tachycardia_episode.yaml` on real hardware, no physical sensors |
+| Wrist unit | `hw-wrist-01` | `generic_wearable_patient` | Real MAX30102 (PPG → HR/SpO2/HRV), ADXL345 (accel → activity phase), TMP102 (temperature, display-only) |
+
+Both devices also keep publishing their original device-specific retained topic
+(`worker_status` for the wrist unit) alongside the canonical `iots/...` messages
+— neither replaces the other.
+
+**Real-sensor data quality.** Unlike the simulator, hardware readings can be
+genuinely absent (e.g. the wrist unit's MAX30102 with no finger on it). In that
+state the firmware publishes `heart_rate`/`spo2`/`heart_rate_variability` as
+`0` with `quality: "bad"` and `fault_active: true`, and hardcodes `condition`
+to `"normal"` instead of running it through threshold classification — a real
+"0" must never look like a genuine bradycardia reading downstream.
+`CloudEngine._ingest()` (`rule_engine/cloud/engine.py`) enforces this
+server-side too: any reading with `quality == "bad"` or `fault_active: true`
+is dropped before it reaches the rolling buffer, so it can never feed a
+windowed rule. See `HANDOFF_wrist_unit_healthcare_integration.md` for the
+full design rationale.
+
+`phase` on hardware devices has no scripted timeline — the wrist unit derives
+it from its own real `ActivityDetector` state (`standing` / `walking` / `running`).
+
+Registering a hardware device as a patient card requires the operator UI's
+Add Patient → Real Hardware flow, `POST /patients/add` with
+`source: "hardware"`, `device_id`, and `persona_id` (see §13). The `device_id`
+must exactly match what the firmware publishes — a mismatch means the vitals
+endpoint queries InfluxDB for a device_id nothing publishes to, and incoming
+alerts can't be resolved back to the registered patient.
+
 ---
 
 ## 13. Demo API Reference
@@ -429,18 +465,28 @@ Base URL: `http://localhost:8000`. Interactive docs: `/docs`.
 | Endpoint | Method | Description |
 |---|---|---|
 | `GET /fleet` | GET | All active patients with current vitals and status |
-| `POST /patients` | POST | Add a patient to the fleet (starts simulation) |
-| `DELETE /patients/{patient_id}` | DELETE | Remove a patient and stop their simulation |
-| `GET /patients/{patient_id}` | GET | Single patient status, vitals, and phase |
+| `POST /patients/add` | POST | Add a patient — simulated (spawns an engine) or hardware (registers a fleet entry, capped at 1) |
+| `DELETE /patients/{patient_id}` | DELETE | Remove a patient and stop their simulation (or free the hardware slot) |
+| `GET /vitals/{device_id}` | GET | Current vitals + 30-reading sparkline history from InfluxDB |
 
-**POST /patients request:**
+**POST /patients/add request — simulated:**
 ```json
 {
-  "patient_id":    "patient_001",
   "label":         "Patient 001",
-  "persona_path":  "personas/cardiac_patient.yaml",
+  "source":        "simulated",
   "scenario_path": "scenarios/health/tachycardia_episode.yaml",
   "compression":   10
+}
+```
+
+**POST /patients/add request — hardware** (`device_id` must exactly match what
+the firmware publishes as `device_id` in its MQTT payload):
+```json
+{
+  "label":      "Patient 001",
+  "source":     "hardware",
+  "device_id":  "hw-wrist-01",
+  "persona_id": "generic_wearable_patient"
 }
 ```
 

@@ -86,6 +86,11 @@ personalised_baseline:
   enabled: true
   min_training_samples: 150         # feature vectors needed before training
   min_training_window_seconds: 240  # real-time minimum before training (4 real minutes)
+  max_training_window_seconds: 600  # hard cap (real seconds, NOT compression-scaled) —
+                                     # train on whatever's collected once this elapses,
+                                     # even below min_training_samples, so a low-throughput
+                                     # or flaky device is never stuck in "learning" forever
+  min_samples_for_time_cap: 20      # floor so the time cap doesn't train on near-nothing
   anomaly_threshold: 0.80           # 0–1, how anomalous before alert fires
   contamination: 0.05               # IsolationForest contamination param
   feature_window_hr_seconds: 30     # window for HR/SpO2 features

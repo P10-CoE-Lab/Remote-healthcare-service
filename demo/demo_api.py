@@ -54,6 +54,15 @@ logger = get_logger(__name__)
 # Single-engine mode adds the engine under the key "primary".
 _fleet: dict[str, dict[str, Any]] = {}   # patient_id → {engine, label, task}
 
+# Explicit device_id → patient_id map, maintained alongside _fleet for both
+# simulated and hardware entries. Used by _resolve_patient() instead of
+# parsing device_id strings, which breaks for shapes that aren't
+# sim-{persona_id}-{patient_id} (e.g. hardware devices like hw-cardiac-01).
+_device_to_patient: dict[str, str] = {}
+
+# Hardware patients are capped at exactly 1 in the fleet.
+_MAX_HARDWARE_PATIENTS = 1
+
 # Shared configs for spawning new engines in population mode.
 _sim_config: dict = {}
 _mqtt_config: dict = {}
@@ -145,8 +154,11 @@ class SetCompressionRequest(BaseModel):
 
 class AddPatientRequest(BaseModel):
     label:         str
-    scenario_path: str
+    source:        str = "simulated"   # "simulated" | "hardware"
+    scenario_path: str | None = None
     compression:   float | None = None
+    device_id:     str | None = None   # hardware only — the device's fixed id
+    persona_id:    str | None = None   # hardware only — which persona/thresholds to classify against
 
 
 # ---------------------------------------------------------------------------
@@ -157,24 +169,55 @@ def _primary_engine():
     """Return the engine to use for single-engine legacy endpoints.
 
     Prefers the engine under key 'primary'; falls back to the first running
-    entry; then any entry.  Returns None if the fleet is empty.
+    entry; then any entry.  Returns None if the fleet is empty or only
+    contains hardware entries (which have no engine).
     """
     if not _fleet:
         return None
     if "primary" in _fleet:
         return _fleet["primary"]["engine"]
     for entry in _fleet.values():
-        if entry["engine"].get_status().running:
+        engine = entry.get("engine")
+        if engine is not None and engine.get_status().running:
+            return engine
+    for entry in _fleet.values():
+        if entry.get("engine") is not None:
             return entry["engine"]
-    return next(iter(_fleet.values()))["engine"]
+    return None
 
 
 def _build_patient_status(patient_id: str) -> dict:
     """Build the full patient status dict for a fleet entry."""
     entry = _fleet[patient_id]
+    risk  = _patient_risk.get(patient_id, {})
+
+    if entry.get("hardware"):
+        device_id = entry["device_id"]
+        baseline  = _patient_baselines.get(device_id, {})
+        return {
+            "patient_id":          patient_id,
+            "device_id":           device_id,
+            "label":               entry["label"],
+            "status":              "running",
+            "source":              "hardware",
+            "scenario_id":         "",
+            "persona_id":          entry["persona_id"],
+            "current_phase":       "",
+            "elapsed_sim_minutes": 0,
+            "total_sim_minutes":   0,
+            "progress_pct":        0,
+            "compression":         1,
+            "available_events":    [],
+            "risk_score":          min(float(risk.get("risk_score", 0)), 100.0),
+            "risk_level":          risk.get("risk_level", "none"),
+            "alert_count":         len(_patient_alert_history.get(patient_id, [])),
+            "device_paused":       False,
+            "baseline_state":      baseline.get("state", "learning"),
+            "baseline_info":       baseline if baseline else None,
+        }
+
     engine = entry["engine"]
     status = engine.get_status()
-    risk   = _patient_risk.get(patient_id, {})
 
     progress = round(
         (status.elapsed_sim_minutes / status.total_sim_minutes * 100)
@@ -183,7 +226,7 @@ def _build_patient_status(patient_id: str) -> dict:
     )
 
     # device_id matches what the simulator publishes to MQTT and InfluxDB
-    device_id = f"sim-{status.persona_id}-{patient_id}"
+    device_id = entry.get("device_id") or f"sim-{status.persona_id}-{patient_id}"
 
     baseline = _patient_baselines.get(device_id, {})
 
@@ -192,6 +235,7 @@ def _build_patient_status(patient_id: str) -> dict:
         "device_id":           device_id,
         "label":               entry["label"],
         "status":              "running" if status.running else "stopped",
+        "source":              "simulated",
         "scenario_id":         status.scenario_id,
         "persona_id":          status.persona_id,
         "current_phase":       status.current_phase,
@@ -267,12 +311,16 @@ async def _spawn_engine(
 
     task = asyncio.create_task(engine.start(_publish))
 
+    device_id = f"sim-{persona_id}-{patient_id}"
+
     _fleet[patient_id] = {
         "engine":    engine,
         "label":     label,
         "task":      task,
         "publisher": publisher if _shared_publisher is None else None,  # owned publisher to clean up
+        "device_id": device_id,
     }
+    _device_to_patient[device_id] = patient_id
 
     logger.info(
         "Patient engine spawned",
@@ -281,6 +329,48 @@ async def _spawn_engine(
             "patient_id": patient_id,
             "label":      label,
             "scenario":   str(scenario_path),
+        },
+    )
+
+
+def _register_hardware_patient(patient_id: str, label: str, device_id: str, persona_id: str) -> None:
+    """Register a hardware-backed patient in the fleet.
+
+    No ScenarioEngine and no dedicated MQTTPublisher — the physical device
+    publishes vitals to MQTT on its own; this just adds a fleet entry and
+    device_id mapping so the demo API can build a status card for it and
+    resolve incoming cloud-engine alerts back to it.
+    """
+    _fleet[patient_id] = {
+        "engine":    None,
+        "hardware":  True,
+        "device_id": device_id,
+        "persona_id": persona_id,
+        "label":     label,
+        "task":      None,
+        "publisher": None,
+    }
+    _device_to_patient[device_id] = patient_id
+
+    # Push the operator's chosen label down to the physical device over a
+    # retained config topic. The device subscribes to this at boot (and
+    # stays subscribed) so Grafana/Influx see the real patient identity
+    # instead of whatever placeholder is baked into the firmware.
+    if _shared_publisher is not None:
+        _shared_publisher.publish_raw(
+            topic=   f"config/{device_id}/patient_label",
+            payload= label,
+            qos=     0,
+            retain=  True,
+        )
+
+    logger.info(
+        "Hardware patient registered",
+        extra={
+            "event":      "hardware_patient_registered",
+            "patient_id": patient_id,
+            "device_id":  device_id,
+            "persona_id": persona_id,
         },
     )
 
@@ -297,22 +387,28 @@ def _fp(rule_id: str, persona_id: str, ts: float) -> str:
 def _resolve_patient(device_id: str, persona_id: str) -> tuple[str, str]:
     """Return (patient_id, patient_label) for an incoming alert.
 
-    Uses device_id first — format is sim-{persona_id}-{patient_id} — so we can
-    identify the exact patient even when multiple patients share the same persona.
-    Falls back to persona_id scan only when device_id parsing fails.
-    """
-    # device_id format: sim-{persona_id}-{patient_id}  e.g. sim-cardiac_patient-a1b2c3d4
-    if device_id:
-        parts = device_id.rsplit("-", 1)
-        if len(parts) == 2:
-            candidate_id = parts[1]
-            if candidate_id in _fleet:
-                return candidate_id, _fleet[candidate_id]["label"]
+    Uses the explicit device_id → patient_id map maintained alongside _fleet
+    (populated at registration time for both simulated and hardware patients)
+    instead of parsing the device_id string. String-splitting on the last
+    "-" breaks for device_id shapes that aren't sim-{persona_id}-{patient_id}
+    — e.g. hardware devices like hw-cardiac-01 — and for any patient_id that
+    itself contains a hyphen.
 
-    # Fallback: first patient whose engine reports this persona_id
+    Falls back to a persona_id scan (simulated patients only) if the device_id
+    isn't in the map yet.
+    """
+    if device_id and device_id in _device_to_patient:
+        candidate_id = _device_to_patient[device_id]
+        if candidate_id in _fleet:
+            return candidate_id, _fleet[candidate_id]["label"]
+
+    # Fallback: first simulated patient whose engine reports this persona_id
     for pid, entry in _fleet.items():
+        engine = entry.get("engine")
+        if engine is None:
+            continue
         try:
-            if entry["engine"].get_status().persona_id == persona_id:
+            if engine.get_status().persona_id == persona_id:
                 return pid, entry["label"]
         except Exception:
             pass
@@ -425,6 +521,8 @@ def _scan_fleet_violations() -> None:
         _seen_violation_fps.clear()
 
     for patient_id, entry in list(_fleet.items()):
+        if entry.get("engine") is None:
+            continue  # hardware patients have no EdgeEngine to scan
         try:
             alerts = entry["engine"].get_edge_alerts(limit=30)
         except Exception:
@@ -798,13 +896,52 @@ def create_app(
 
     @app.post("/patients/add", status_code=201)
     async def add_patient(req: AddPatientRequest):
-        """Spawn a new patient engine and add it to the fleet (max 10)."""
+        """Add a new patient to the fleet — simulated (spawns an engine, max 10)
+        or hardware (registers a fleet entry for a real device, capped at 1)."""
         try:
+            if req.source not in ("simulated", "hardware"):
+                raise HTTPException(status_code=400, detail="source must be 'simulated' or 'hardware'")
+
+            if req.source == "hardware":
+                hw_count = sum(1 for e in _fleet.values() if e.get("hardware"))
+                if hw_count >= _MAX_HARDWARE_PATIENTS:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="A hardware patient is already registered. Remove it before adding another.",
+                    )
+                if not req.device_id or not req.persona_id:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="device_id and persona_id are required for hardware patients",
+                    )
+                if req.device_id in _device_to_patient:
+                    raise HTTPException(status_code=400, detail=f"Device '{req.device_id}' is already registered")
+
+                persona_path = Path("personas") / f"{req.persona_id}.yaml"
+                if not persona_path.exists():
+                    raise HTTPException(status_code=400, detail=f"Persona file not found: {persona_path}")
+
+                patient_id = uuid.uuid4().hex[:8]
+                # Default label deliberately avoids device_id/persona_id — neither
+                # should leak a pre-configured condition profile to a demo audience.
+                label = req.label or f"Hardware Patient {patient_id[:4].upper()}"
+                _register_hardware_patient(patient_id, label, req.device_id, req.persona_id)
+
+                return {
+                    "success":    True,
+                    "patient_id": patient_id,
+                    "label":      label,
+                    "message":    f"Hardware patient '{label}' registered",
+                }
+
+            # source == "simulated" — existing path, unchanged
             if len(_fleet) >= 10:
                 raise HTTPException(
                     status_code=400,
                     detail="Fleet is full (max 10 patients). Remove one before adding another.",
                 )
+            if not req.scenario_path:
+                raise HTTPException(status_code=400, detail="scenario_path is required for simulated patients")
 
             scenario_path = Path(req.scenario_path)
             if not scenario_path.exists():
@@ -833,24 +970,31 @@ def create_app(
 
     @app.delete("/patients/{patient_id}")
     async def remove_patient(patient_id: str):
-        """Stop and remove a patient engine from the fleet."""
+        """Stop and remove a patient engine from the fleet, or unregister a
+        hardware entry (frees up the single hardware slot)."""
         if patient_id not in _fleet:
             raise HTTPException(status_code=404, detail=f"Patient '{patient_id}' not found")
         try:
             entry = _fleet.pop(patient_id)
-            engine = entry["engine"]
-            await engine.stop()
 
-            task = entry.get("task")
-            if task and not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+            device_id = entry.get("device_id")
+            if device_id and _device_to_patient.get(device_id) == patient_id:
+                del _device_to_patient[device_id]
 
-            if entry.get("publisher"):
-                entry["publisher"].stop()
+            if entry.get("engine") is not None:
+                engine = entry["engine"]
+                await engine.stop()
+
+                task = entry.get("task")
+                if task and not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+
+                if entry.get("publisher"):
+                    entry["publisher"].stop()
 
             logger.info(
                 "Patient removed",
@@ -966,6 +1110,13 @@ from(bucket: "{influx_bucket}")
             except Exception:
                 continue
 
+        # Flux returns one table per distinct tag-set survivor (e.g. a
+        # patient_label change mid-window splits a sensor across tables),
+        # and tables are concatenated in whatever order Flux emits them —
+        # not guaranteed chronological. Sort before trusting "last".
+        for readings in buffers.values():
+            readings.sort(key=lambda r: r["timestamp"])
+
         def _last(name: str) -> float | None:
             readings = buffers.get(name, [])
             return readings[-1]["value"] if readings else None
@@ -1067,10 +1218,21 @@ from(bucket: "{influx_bucket}")
             from rule_engine.llm.context_builder import build_summary_context
             from rule_engine.llm.summariser import generate_summary
 
-            entry      = _fleet[patient_id]
-            status     = entry["engine"].get_status()
-            device_id  = f"sim-{status.persona_id}-{patient_id}"
-            baseline   = _patient_baselines.get(device_id, {})
+            entry = _fleet[patient_id]
+
+            if entry.get("hardware"):
+                device_id   = entry["device_id"]
+                persona_id  = entry["persona_id"]
+                compression = 1
+                elapsed_min = 0
+            else:
+                status      = entry["engine"].get_status()
+                device_id   = entry.get("device_id") or f"sim-{status.persona_id}-{patient_id}"
+                persona_id  = status.persona_id
+                compression = status.compression
+                elapsed_min = status.elapsed_sim_minutes
+
+            baseline = _patient_baselines.get(device_id, {})
 
             # Ensure edge-engine alerts are in the buffer and history
             _scan_fleet_violations()
@@ -1091,10 +1253,10 @@ from(bucket: "{influx_bucket}")
             context = await build_summary_context(
                 patient_id=    patient_id,
                 device_id=     device_id,
-                persona_id=    status.persona_id,
+                persona_id=    persona_id,
                 label=         entry["label"],
-                compression=   status.compression,
-                elapsed_min=   status.elapsed_sim_minutes,
+                compression=   compression,
+                elapsed_min=   elapsed_min,
                 baseline=      baseline,
                 session_alerts=recent_alerts,
             )

@@ -105,6 +105,15 @@ class PersonalisedAnalyzer(Analyzer):
 
         self._min_samples  = int(self._bc.get("min_training_samples", 40))
         self._min_window   = float(self._bc.get("min_training_window_seconds", 90))
+        # Hard ceiling on how long LEARNING can run before training fires anyway,
+        # whichever of (min_samples reached) / (time cap reached) comes first —
+        # a low-throughput or flaky device (e.g. hardware with real MQTT gaps)
+        # should never be stuck in "learning" forever. Expressed in plain real
+        # seconds (NOT divided by compression like min_training_window_seconds)
+        # since this is a wall-clock operational safety valve, not a scenario
+        # realism setting.
+        self._max_window_real_s   = float(self._bc.get("max_training_window_seconds", 600))
+        self._min_samples_on_cap  = int(self._bc.get("min_samples_for_time_cap", 20))
         self._threshold    = float(self._bc.get("anomaly_threshold", 0.70))
         self._contamination = float(self._bc.get("contamination", 0.05))
         self._win_hr       = float(self._bc.get("feature_window_hr_seconds", 30))
@@ -171,13 +180,32 @@ class PersonalisedAnalyzer(Analyzer):
             state.training_vectors.append(vec)
             baseline.samples_collected = len(state.training_vectors)
 
-        real_elapsed = time.monotonic() - state.training_start
+        real_elapsed    = time.monotonic() - state.training_start
         real_min_window = self._min_window / max(compression, 1.0)
-        ready = (
+
+        enough_data = (
             len(state.training_vectors) >= self._min_samples
             and real_elapsed >= real_min_window
         )
-        if ready:
+        # Time cap hit — train early on whatever we have, as long as it clears
+        # a sane floor (too few samples would make the IsolationForest garbage).
+        timed_out = (
+            real_elapsed >= self._max_window_real_s
+            and len(state.training_vectors) >= self._min_samples_on_cap
+        )
+
+        if enough_data or timed_out:
+            if timed_out and not enough_data:
+                logger.info(
+                    "IF training triggered by time cap — fewer samples than the ideal minimum",
+                    extra={
+                        "event":       "if_train_time_cap",
+                        "device_id":   device_id,
+                        "samples":     len(state.training_vectors),
+                        "min_samples": self._min_samples,
+                        "real_elapsed_s": round(real_elapsed, 1),
+                    },
+                )
             self._train(device_id, persona_id, state, baseline)
 
         # Always delegate to static rules during LEARNING

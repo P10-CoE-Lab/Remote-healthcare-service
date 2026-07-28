@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Zap, Trash2, ChevronDown, Heart, Wind, Activity, BatteryLow, BatteryMedium, BatteryFull, WifiOff, ExternalLink, Brain } from 'lucide-react';
+import { Zap, Trash2, ChevronDown, Heart, Wind, Activity, BatteryLow, BatteryMedium, BatteryFull, WifiOff, ExternalLink, Brain, Radio } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { removePatient, triggerEvent } from '../api/patients';
 import { usePatientVitals } from '../hooks/usePatientVitals';
@@ -63,6 +63,7 @@ export function PatientCard({ patient }: PatientCardProps) {
   const vitals         = usePatientVitals(patient.device_id);
   const available_events = patient.available_events ?? [];
   const { risk_level, status, current_phase } = patient;
+  const isHardware     = patient.source === 'hardware';
   const dotClass       = statusDotClass(status, risk_level);
   const lineColor      = sparklineColor(risk_level);
   const isStopped      = status !== 'running';
@@ -114,7 +115,7 @@ export function PatientCard({ patient }: PatientCardProps) {
                 {patient.label}
               </h3>
               <p className="text-xs text-slate-500 mt-0.5 truncate">
-                {scenarioLabel(patient.scenario_id)}
+                {isHardware ? 'Live Hardware Device' : scenarioLabel(patient.scenario_id)}
               </p>
             </div>
           </div>
@@ -166,28 +167,40 @@ export function PatientCard({ patient }: PatientCardProps) {
         </div>
       )}
 
-      {/* ── Phase + Progress ────────────────────────────────────── */}
+      {/* ── Phase + Progress (hardware: LIVE badge instead) ─────── */}
       <div className="px-5 pb-3">
-        <div className="flex items-center justify-between mb-1.5">
-          <PhaseBadge phase={current_phase} />
-          <span className="text-xs text-slate-500 tabular-nums">
-            {formatMinutes(patient.elapsed_sim_minutes)} /{' '}
-            {Math.round(patient.total_sim_minutes)}m sim
-          </span>
-        </div>
-        <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-          <div
-            className={cn(
-              'h-full rounded-full transition-all duration-1000',
-              isComplete ? 'bg-slate-400' :
-              risk_level === 'critical' ? 'bg-red-500' :
-              risk_level === 'high'     ? 'bg-orange-500' :
-              risk_level === 'medium'   ? 'bg-amber-500' :
-              'bg-blue-500',
-            )}
-            style={{ width: `${Math.min(patient.progress_pct, 100)}%` }}
-          />
-        </div>
+        {isHardware ? (
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <Radio size={10} className="animate-pulse-slow" />
+              LIVE
+            </span>
+            <span className="text-xs text-slate-500 truncate">Real-time feed</span>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between mb-1.5">
+              <PhaseBadge phase={current_phase} />
+              <span className="text-xs text-slate-500 tabular-nums">
+                {formatMinutes(patient.elapsed_sim_minutes)} /{' '}
+                {Math.round(patient.total_sim_minutes)}m sim
+              </span>
+            </div>
+            <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+              <div
+                className={cn(
+                  'h-full rounded-full transition-all duration-1000',
+                  isComplete ? 'bg-slate-400' :
+                  risk_level === 'critical' ? 'bg-red-500' :
+                  risk_level === 'high'     ? 'bg-orange-500' :
+                  risk_level === 'medium'   ? 'bg-amber-500' :
+                  'bg-blue-500',
+                )}
+                style={{ width: `${Math.min(patient.progress_pct, 100)}%` }}
+              />
+            </div>
+          </>
+        )}
       </div>
 
       {/* ── Vitals — always visible; dimmed when disconnected ───── */}

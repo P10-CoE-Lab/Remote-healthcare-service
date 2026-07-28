@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Wrist Unit — Hardware Test Dashboard</title>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1216;
+    --panel: #171b21;
+    --border: #2a2f38;
+    --text: #e6e8eb;
+    --muted: #8b93a1;
+    --ok: #35c46a;
+    --warn: #e0a72e;
+    --bad: #e5484d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+
+  .connbar {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 14px; margin-bottom: 20px;
+    font-size: 13px; flex-wrap: wrap;
+  }
+  .connbar input {
+    background: #0f1216; border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 6px 8px; font-size: 13px; width: 220px;
+  }
+  .connbar button {
+    background: #2b5fd9; color: white; border: none; border-radius: 6px;
+    padding: 7px 14px; font-size: 13px; cursor: pointer;
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); flex-shrink: 0; }
+  .dot.on { background: var(--ok); }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px;
+  }
+  .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .card .value { font-size: 28px; font-weight: 600; margin-top: 6px; }
+  .card .unit { font-size: 13px; color: var(--muted); margin-left: 4px; font-weight: 400; }
+  .card.alert { border-color: var(--bad); }
+  .card.alert .value { color: var(--bad); }
+  .card.warn { border-color: var(--warn); }
+  .card.warn .value { color: var(--warn); }
+  .card.good .value { color: var(--ok); }
+
+  .stale { opacity: 0.4; }
+  .no-finger { opacity: 0.35; }
+
+  h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin: 0 0 10px; }
+
+  .log {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 14px; height: 240px; overflow-y: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px; color: var(--muted); white-space: pre-wrap;
+  }
+  .log .line { color: var(--text); }
+  .log .topic { color: #6ea8fe; }
+</style>
+</head>
+<body>
+
+<h1>Wrist Unit — Hardware Test Dashboard</h1>
+<div class="sub">Minimal MQTT-over-WebSocket viewer for the WorkerSafety-ESP32C6 wrist unit (MAX30102 + ADXL345 + TMP102). No backend, no build step — just this file. Reads the single combined <code>worker_status</code> JSON message, same as the Serial output.</div>
+
+<div class="connbar">
+  <span class="dot" id="dot"></span>
+  <span id="status">disconnected</span>
+  <span style="color:var(--muted)">broker:</span>
+  <input id="host" value="">
+  <span style="color:var(--muted)">port:</span>
+  <input id="port" value="9001" style="width:70px">
+  <span style="color:var(--muted)">topic:</span>
+  <input id="topicFilter" value="worker_status" style="width:160px">
+  <button id="connectBtn">Connect</button>
+</div>
+
+<h2>Vital Signs</h2>
+<div class="grid">
+  <div class="card" id="card-hr"><div class="label">Heart Rate</div><div class="value" id="v-hr">—<span class="unit">bpm</span></div></div>
+  <div class="card" id="card-hrv"><div class="label">HRV (RMSSD)</div><div class="value" id="v-hrv">—<span class="unit">ms</span></div></div>
+  <div class="card" id="card-spo2"><div class="label">SpO₂</div><div class="value" id="v-spo2">—<span class="unit">%</span></div></div>
+  <div class="card" id="card-temp"><div class="label">Body Temperature</div><div class="value" id="v-temp">—<span class="unit">°C</span></div></div>
+  <div class="card" id="card-finger"><div class="label">Finger Detected</div><div class="value" id="v-finger">—</div></div>
+</div>
+
+<h2>Motion &amp; Safety</h2>
+<div class="grid">
+  <div class="card" id="card-activity"><div class="label">Activity</div><div class="value" id="v-activity">—</div></div>
+  <div class="card" id="card-accel"><div class="label">Acceleration</div><div class="value" id="v-accel">—<span class="unit">g</span></div></div>
+  <div class="card" id="card-orientation"><div class="label">Orientation</div><div class="value" id="v-orientation">—<span class="unit">°</span></div></div>
+  <div class="card" id="card-fall"><div class="label">Fall Detected</div><div class="value" id="v-fall">—</div></div>
+</div>
+
+<h2>Device</h2>
+<div class="grid">
+  <div class="card" id="card-battery"><div class="label">Battery</div><div class="value" id="v-battery">—<span class="unit">%</span></div></div>
+  <div class="card" id="card-uptime"><div class="label">Uptime</div><div class="value" id="v-uptime">—</div></div>
+  <div class="card" id="card-anchor"><div class="label">Nearest BLE Anchor</div><div class="value" id="v-anchor">—</div></div>
+</div>
+
+<h2>Raw Message Log</h2>
+<div class="log" id="log"></div>
+
+<script>
+const dotEl = document.getElementById('dot');
+const statusEl = document.getElementById('status');
+const logEl = document.getElementById('log');
+const hostInput = document.getElementById('host');
+const portInput = document.getElementById('port');
+const topicInput = document.getElementById('topicFilter');
+const connectBtn = document.getElementById('connectBtn');
+
+hostInput.value = window.location.hostname || 'localhost';
+
+let client = null;
+let staleTimer = null;
+
+function setStatus(text, ok) {
+  statusEl.textContent = text;
+  dotEl.classList.toggle('on', !!ok);
+}
+
+function logLine(topic, payload) {
+  const time = new Date().toLocaleTimeString();
+  const div = document.createElement('div');
+  div.innerHTML = `<span class="line">[${time}] <span class="topic">${topic}</span> ${payload}</span>`;
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+  while (logEl.childNodes.length > 300) logEl.removeChild(logEl.firstChild);
+}
+
+function setVal(id, text) {
+  document.getElementById(id).firstChild.textContent = text;
+}
+
+function markFresh() {
+  document.querySelectorAll('.card').forEach(c => c.classList.remove('stale'));
+  clearTimeout(staleTimer);
+  staleTimer = setTimeout(() => {
+    document.querySelectorAll('.card').forEach(c => c.classList.add('stale'));
+  }, 5000);
+}
+
+function fmt(n, digits) {
+  return typeof n === 'number' ? n.toFixed(digits) : '—';
+}
+
+function handleStatus(msg) {
+  const noFinger = msg.fingerDetected === false;
+
+  setVal('v-hr', fmt(msg.heartRate, 1));
+  setVal('v-hrv', fmt(msg.heartRateVariability, 1));
+  setVal('v-spo2', fmt(msg.spo2, 0));
+  document.getElementById('card-hr').classList.toggle('no-finger', noFinger);
+  document.getElementById('card-hrv').classList.toggle('no-finger', noFinger);
+  document.getElementById('card-spo2').classList.toggle('no-finger', noFinger);
+
+  setVal('v-temp', fmt(msg.temperature, 1));
+  setVal('v-finger', msg.fingerDetected ? 'YES' : 'NO');
+
+  setVal('v-activity', msg.activity ?? '—');
+  setVal('v-accel', fmt(msg.acceleration, 2));
+  setVal('v-orientation', fmt(msg.orientation, 1));
+
+  const fallCard = document.getElementById('card-fall');
+  setVal('v-fall', msg.fallDetected ? 'YES' : 'NO');
+  fallCard.classList.toggle('alert', !!msg.fallDetected);
+
+  setVal('v-battery', typeof msg.battery === 'number' ? msg.battery.toFixed(0) : '—');
+  const batteryCard = document.getElementById('card-battery');
+  batteryCard.classList.toggle('warn', typeof msg.battery === 'number' && msg.battery < 30 && msg.battery >= 15);
+  batteryCard.classList.toggle('alert', typeof msg.battery === 'number' && msg.battery < 15);
+
+  if (typeof msg.uptime === 'number') {
+    const s = Math.floor(msg.uptime / 1000);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    setVal('v-uptime', `${h}h ${m}m ${sec}s`);
+  } else {
+    setVal('v-uptime', '—');
+  }
+
+  if (msg.nearestAnchorID) {
+    setVal('v-anchor', `#${msg.nearestAnchorID} · RSSI ${msg.anchorRSSI ?? '—'} · ${fmt(msg.anchorDistance, 2)}m`);
+  } else {
+    setVal('v-anchor', 'none');
+  }
+}
+
+function connect() {
+  if (client) { client.end(true); client = null; }
+
+  const host = hostInput.value.trim() || 'localhost';
+  const port = portInput.value.trim() || '9001';
+  const topic = topicInput.value.trim() || 'worker_status';
+  const url = `ws://${host}:${port}`;
+
+  setStatus(`connecting to ${url} ...`, false);
+  client = mqtt.connect(url, { reconnectPeriod: 2000 });
+
+  client.on('connect', () => {
+    setStatus(`connected — ${url}`, true);
+    client.subscribe(topic, (err) => {
+      if (err) logLine('error', 'subscribe failed: ' + err.message);
+    });
+  });
+
+  client.on('reconnect', () => setStatus(`reconnecting to ${url} ...`, false));
+  client.on('close', () => setStatus('disconnected', false));
+  client.on('error', (err) => setStatus('error: ' + err.message, false));
+
+  client.on('message', (topicName, payload) => {
+    const text = payload.toString();
+    logLine(topicName, text);
+    markFresh();
+    let msg;
+    try { msg = JSON.parse(text); } catch (e) { return; }
+    handleStatus(msg);
+  });
+}
+
+connectBtn.addEventListener('click', connect);
+connect();
+</script>
+
+</body>
+</html>

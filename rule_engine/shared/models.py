@@ -27,6 +27,8 @@ class RuleReading:
     compression:   float = 1.0
     timestamp:     float = field(default_factory=time.time)
     patient_label: str   = ""
+    quality:       str   = "good"    # "good" | "uncertain" | "bad"
+    fault_active:  bool  = False
 
     @classmethod
     def from_mqtt_payload(cls, payload: dict[str, Any]) -> "RuleReading":
@@ -42,6 +44,8 @@ class RuleReading:
             condition=     payload.get("condition", "normal"),
             compression=   float(payload.get("compression", 1.0)),
             patient_label= payload.get("patient_label", ""),
+            quality=       payload.get("quality", "good"),
+            fault_active=  bool(payload.get("fault_active", False)),
         )
 
 

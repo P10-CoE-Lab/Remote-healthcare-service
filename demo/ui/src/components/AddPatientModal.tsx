@@ -1,12 +1,15 @@
 import { useState } from 'react';
-import { X, Play, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import { X, Play, ChevronDown, ChevronUp, Loader2, Cpu, Radio } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getScenarioCatalog } from '../api/scenarios';
+import { getPersonas } from '../api/personas';
 import { addPatient } from '../api/patients';
+import type { PatientSource } from '../types';
 import { cn } from '../lib/utils';
 
 interface AddPatientModalProps {
   currentCount: number;
+  hasHardwarePatient: boolean;
   onClose: () => void;
 }
 
@@ -18,13 +21,21 @@ const SPEEDS = [
   { label: '120×', value: 120, desc: '8 hr in 4 min' },
 ];
 
-export function AddPatientModal({ currentCount, onClose }: AddPatientModalProps) {
+function personaLabel(personaPath: string): string {
+  const stem = personaPath.split('/').pop()?.replace(/\.ya?ml$/, '') ?? personaPath;
+  return stem.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+export function AddPatientModal({ currentCount, hasHardwarePatient, onClose }: AddPatientModalProps) {
   const qc = useQueryClient();
   const nextNum = String(currentCount + 1).padStart(3, '0');
 
+  const [source, setSource]     = useState<PatientSource>('simulated');
   const [label, setLabel]       = useState(`Patient ${nextNum}`);
   const [scenarioPath, setPath] = useState('');
   const [compression, setSpeed] = useState(10);
+  const [deviceId, setDeviceId] = useState('hw-wrist-01');
+  const [personaId, setPersonaId] = useState('');
   const [error, setError]       = useState('');
   const [expandedIdx, setExpanded] = useState<number | null>(null);
 
@@ -34,9 +45,23 @@ export function AddPatientModal({ currentCount, onClose }: AddPatientModalProps)
     staleTime: 60_000,
   });
 
+  const { data: personasData, isLoading: personasLoading } = useQuery({
+    queryKey: ['personas'],
+    queryFn: getPersonas,
+    staleTime: 60_000,
+    enabled: source === 'hardware',
+  });
+
   const add = useMutation({
     mutationFn: () =>
-      addPatient({ label: label.trim() || `Patient ${nextNum}`, scenario_path: scenarioPath, compression }),
+      source === 'hardware'
+        ? addPatient({
+            label: label.trim() || `Hardware (${deviceId})`,
+            source: 'hardware',
+            device_id: deviceId.trim(),
+            persona_id: personaId,
+          })
+        : addPatient({ label: label.trim() || `Patient ${nextNum}`, source: 'simulated', scenario_path: scenarioPath, compression }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['fleet'] });
       onClose();
@@ -46,7 +71,14 @@ export function AddPatientModal({ currentCount, onClose }: AddPatientModalProps)
 
   const availableScenarios = catalog?.catalog.filter((s) => s.available) ?? [];
   const selectedScenario   = availableScenarios.find((s) => s.path === scenarioPath);
-  const canSubmit          = scenarioPath !== '' && label.trim() !== '' && !add.isPending;
+  const personas           = personasData?.personas ?? [];
+
+  const canSubmit =
+    !add.isPending &&
+    label.trim() !== '' &&
+    (source === 'hardware'
+      ? deviceId.trim() !== '' && personaId !== ''
+      : scenarioPath !== '');
 
   return (
     <>
@@ -82,6 +114,49 @@ export function AddPatientModal({ currentCount, onClose }: AddPatientModalProps)
           {/* Body */}
           <div className="flex-1 overflow-y-auto thin-scroll px-6 py-5 space-y-5">
 
+            {/* Source toggle */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                Patient Source
+              </label>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setSource('simulated'); setError(''); }}
+                  className={cn(
+                    'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold border transition-all',
+                    source === 'simulated'
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                      : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400 hover:text-blue-600',
+                  )}
+                >
+                  <Cpu size={14} />
+                  Simulated
+                </button>
+                <button
+                  type="button"
+                  disabled={hasHardwarePatient}
+                  title={hasHardwarePatient ? 'A hardware patient is already registered' : undefined}
+                  onClick={() => { setSource('hardware'); setError(''); }}
+                  className={cn(
+                    'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold border transition-all',
+                    source === 'hardware'
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                      : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400 hover:text-blue-600',
+                    hasHardwarePatient && 'opacity-40 cursor-not-allowed hover:border-slate-300 hover:text-slate-600',
+                  )}
+                >
+                  <Radio size={14} />
+                  Real Hardware
+                </button>
+              </div>
+              {hasHardwarePatient && (
+                <p className="text-xs text-slate-400 mt-1.5">
+                  Only one hardware patient can be registered at a time — remove the existing one first.
+                </p>
+              )}
+            </div>
+
             {/* Label */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1.5">
@@ -96,7 +171,66 @@ export function AddPatientModal({ currentCount, onClose }: AddPatientModalProps)
               />
             </div>
 
+            {/* Hardware fields */}
+            {source === 'hardware' && (
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    Device ID
+                  </label>
+                  <input
+                    type="text"
+                    value={deviceId}
+                    onChange={(e) => setDeviceId(e.target.value)}
+                    placeholder="e.g. hw-wrist-01"
+                    className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                  />
+                  <p className="text-xs text-slate-400 mt-1.5">
+                    The device's fixed id — must match what it publishes over MQTT.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    Persona
+                  </label>
+                  {personasLoading ? (
+                    <div className="flex items-center gap-2 text-sm text-slate-400 py-4">
+                      <Loader2 size={14} className="animate-spin" />
+                      Loading personas…
+                    </div>
+                  ) : (
+                    <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100">
+                      {personas.map((p) => {
+                        const stem = p.split('/').pop()?.replace(/\.ya?ml$/, '') ?? p;
+                        const isSelected = stem === personaId;
+                        return (
+                          <button
+                            key={p}
+                            type="button"
+                            onClick={() => { setPersonaId(stem); setError(''); }}
+                            className={cn(
+                              'w-full text-left px-4 py-3 text-sm font-medium transition-colors',
+                              isSelected
+                                ? 'bg-blue-50 border-l-4 border-l-blue-500 pl-3.5 text-blue-800'
+                                : 'hover:bg-slate-50 border-l-4 border-l-transparent text-slate-800',
+                            )}
+                          >
+                            {personaLabel(p)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <p className="text-xs text-slate-400 mt-1.5">
+                    Which thresholds to classify this device's readings against.
+                  </p>
+                </div>
+              </>
+            )}
+
             {/* Scenario */}
+            {source === 'simulated' && (
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                 Scenario
@@ -157,8 +291,10 @@ export function AddPatientModal({ currentCount, onClose }: AddPatientModalProps)
                 </p>
               )}
             </div>
+            )}
 
-            {/* Speed */}
+            {/* Speed — meaningless for real-time hardware, simulated only */}
+            {source === 'simulated' && (
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                 Simulation Speed
@@ -186,6 +322,7 @@ export function AddPatientModal({ currentCount, onClose }: AddPatientModalProps)
                 {' '}· Recommended: 10× for live demos
               </p>
             </div>
+            )}
 
             {error && (
               <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">

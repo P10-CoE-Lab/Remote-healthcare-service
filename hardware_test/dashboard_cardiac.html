@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Cardiac Patient Sim — Hardware Test Dashboard</title>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1216;
+    --panel: #171b21;
+    --border: #2a2f38;
+    --text: #e6e8eb;
+    --muted: #8b93a1;
+    --ok: #35c46a;
+    --warn: #e0a72e;
+    --bad: #e5484d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+
+  .connbar {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 14px; margin-bottom: 20px;
+    font-size: 13px; flex-wrap: wrap;
+  }
+  .connbar input {
+    background: #0f1216; border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 6px 8px; font-size: 13px; width: 220px;
+  }
+  .connbar button {
+    background: #2b5fd9; color: white; border: none; border-radius: 6px;
+    padding: 7px 14px; font-size: 13px; cursor: pointer;
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); flex-shrink: 0; }
+  .dot.on { background: var(--ok); }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px;
+  }
+  .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .card .value { font-size: 28px; font-weight: 600; margin-top: 6px; }
+  .card .unit { font-size: 13px; color: var(--muted); margin-left: 4px; font-weight: 400; }
+  .card.alert { border-color: var(--bad); }
+  .card.alert .value { color: var(--bad); }
+  .card.warn { border-color: var(--warn); }
+  .card.warn .value { color: var(--warn); }
+  .card.good .value { color: var(--ok); }
+
+  .stale { opacity: 0.4; }
+
+  h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin: 0 0 10px; }
+
+  .log {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 14px; height: 260px; overflow-y: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px; color: var(--muted); white-space: pre-wrap;
+  }
+  .log .line { color: var(--text); }
+  .log .topic { color: #6ea8fe; }
+</style>
+</head>
+<body>
+
+<h1>Cardiac Patient Sim — Hardware Test Dashboard</h1>
+<div class="sub">Minimal MQTT-over-WebSocket viewer for the ESP32 cardiac_patient scenario. No backend, no build step — just this file.</div>
+
+<div class="connbar">
+  <span class="dot" id="dot"></span>
+  <span id="status">disconnected</span>
+  <span style="color:var(--muted)">broker:</span>
+  <input id="host" value="">
+  <span style="color:var(--muted)">port:</span>
+  <input id="port" value="9001" style="width:70px">
+  <span style="color:var(--muted)">topic:</span>
+  <input id="topicFilter" value="iots/healthcare/cardiac_patient/#" style="width:220px">
+  <button id="connectBtn">Connect</button>
+</div>
+
+<h2>Live Vitals — hw-cardiac-01</h2>
+<div class="grid">
+  <div class="card" id="card-hr"><div class="label">Heart Rate</div><div class="value" id="v-hr">—<span class="unit">bpm</span></div></div>
+  <div class="card" id="card-hr-cond"><div class="label">HR Condition</div><div class="value" id="v-hr-cond">—</div></div>
+  <div class="card" id="card-spo2"><div class="label">SpO₂</div><div class="value" id="v-spo2">—<span class="unit">%</span></div></div>
+  <div class="card" id="card-spo2-cond"><div class="label">SpO₂ Condition</div><div class="value" id="v-spo2-cond">—</div></div>
+  <div class="card" id="card-phase"><div class="label">Phase</div><div class="value" id="v-phase">—</div></div>
+</div>
+
+<h2>Raw Message Log</h2>
+<div class="log" id="log"></div>
+
+<script>
+const dotEl = document.getElementById('dot');
+const statusEl = document.getElementById('status');
+const logEl = document.getElementById('log');
+const hostInput = document.getElementById('host');
+const portInput = document.getElementById('port');
+const topicInput = document.getElementById('topicFilter');
+const connectBtn = document.getElementById('connectBtn');
+
+hostInput.value = window.location.hostname || 'localhost';
+
+let client = null;
+let staleTimer = null;
+
+function setStatus(text, ok) {
+  statusEl.textContent = text;
+  dotEl.classList.toggle('on', !!ok);
+}
+
+function logLine(topic, payload) {
+  const time = new Date().toLocaleTimeString();
+  const div = document.createElement('div');
+  div.innerHTML = `<span class="line">[${time}] <span class="topic">${topic}</span> ${payload}</span>`;
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+  while (logEl.childNodes.length > 300) logEl.removeChild(logEl.firstChild);
+}
+
+function setVal(id, text) {
+  document.getElementById(id).firstChild.textContent = text;
+}
+
+function markFresh() {
+  document.querySelectorAll('.card').forEach(c => c.classList.remove('stale'));
+  clearTimeout(staleTimer);
+  staleTimer = setTimeout(() => {
+    document.querySelectorAll('.card').forEach(c => c.classList.add('stale'));
+  }, 5000);
+}
+
+function setConditionCard(cardId, valueId, condition) {
+  const card = document.getElementById(cardId);
+  document.getElementById(valueId).firstChild.textContent = condition ?? '—';
+  card.classList.toggle('good', condition === 'normal');
+  card.classList.toggle('warn', condition === 'warning');
+  card.classList.toggle('alert', condition === 'critical');
+}
+
+function handleReading(msg) {
+  setVal('v-phase', msg.phase ?? '—');
+
+  if (msg.sensor_name === 'heart_rate') {
+    setVal('v-hr', typeof msg.value === 'number' ? msg.value.toFixed(1) : '—');
+    setConditionCard('card-hr-cond', 'v-hr-cond', msg.condition);
+  }
+  if (msg.sensor_name === 'spo2') {
+    setVal('v-spo2', typeof msg.value === 'number' ? msg.value.toFixed(0) : '—');
+    setConditionCard('card-spo2-cond', 'v-spo2-cond', msg.condition);
+  }
+}
+
+function connect() {
+  if (client) { client.end(true); client = null; }
+
+  const host = hostInput.value.trim() || 'localhost';
+  const port = portInput.value.trim() || '9001';
+  const topic = topicInput.value.trim() || '#';
+  const url = `ws://${host}:${port}`;
+
+  setStatus(`connecting to ${url} ...`, false);
+  client = mqtt.connect(url, { reconnectPeriod: 2000 });
+
+  client.on('connect', () => {
+    setStatus(`connected — ${url}`, true);
+    client.subscribe(topic, (err) => {
+      if (err) logLine('error', 'subscribe failed: ' + err.message);
+    });
+  });
+
+  client.on('reconnect', () => setStatus(`reconnecting to ${url} ...`, false));
+  client.on('close', () => setStatus('disconnected', false));
+  client.on('error', (err) => setStatus('error: ' + err.message, false));
+
+  client.on('message', (topicName, payload) => {
+    const text = payload.toString();
+    logLine(topicName, text);
+    markFresh();
+    let msg;
+    try { msg = JSON.parse(text); } catch (e) { return; }
+    handleReading(msg);
+  });
+}
+
+connectBtn.addEventListener('click', connect);
+connect();
+</script>
+
+</body>
+</html>

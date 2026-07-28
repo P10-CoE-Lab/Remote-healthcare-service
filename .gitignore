@@ -27,6 +27,7 @@ BUGS.md
 SIMULATOR_OVERVIEW.md
 FEATURE_PLAN.md
 NEXT_CHAT_BRIEF.md
+HANDOFF_*.md
 
 # Claude Code internal memory
 .claude/
@@ -35,6 +36,9 @@ NEXT_CHAT_BRIEF.md
 demo/static/assets/
 demo/ui/node_modules/
 demo/ui/dist/
+
+# Vendored third-party Arduino libraries (fetchable via Arduino Library Manager)
+hardware_test/**/libraries/
 
 # Runtime logs and scratch files
 logs/

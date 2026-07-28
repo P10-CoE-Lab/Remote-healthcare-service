@@ -197,6 +197,14 @@ class CloudEngine:
         if reading.patient_label:
             self._device_label[reading.device_id]   = reading.patient_label
 
+        # A bad-quality/fault reading (e.g. real hardware reporting "0"
+        # because a finger isn't on the PPG sensor) is not a genuine
+        # clinical value. Never buffer it — otherwise a windowed rule
+        # could mistake "no data" for a real bradycardia/etc. episode.
+        # See HANDOFF_wrist_unit_healthcare_integration.md.
+        if reading.quality == "bad" or reading.fault_active:
+            return
+
         buf = self._buffers[reading.device_id][reading.sensor_name]
         buf.append((arrived_at, reading.value))
 

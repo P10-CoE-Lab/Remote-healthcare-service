@@ -1,0 +1,89 @@
+# personas/generic_wearable_patient.yaml
+# Persona: Generic wearer of a real hardware wrist unit — not a scripted
+# clinical narrative. See HANDOFF_wrist_unit_healthcare_integration.md.
+#
+# Unlike the other healthcare personas (cardiac_patient, diabetic_cardiac,
+# elderly_hypertensive, post_surgery_recovery, young_arrhythmia), this
+# persona is never driven by the Python simulator's scenario engine — its
+# vitals always come from a real device (MAX30102 PPG, TMP102 temperature)
+# via hardware_test/ESP32_firmware/WorkerSafety-ESP32C6/workersafety/. It
+# exists so the application layer (demo_api.py hardware patient
+# registration, Grafana, rule_engine) has baseline ranges and thresholds to
+# classify against, the same way it would for a simulated patient.
+
+schema_version: "1.0"
+persona_id: generic_wearable_patient
+description: "Generic real-hardware wearer — no scripted clinical narrative, thresholds are population defaults only"
+poc_type: healthcare
+
+# ---------------------------------------------------------------------------
+# Baseline sensor ranges — healthy adult at rest.
+# Population defaults only. PersonalisedAnalyzer (see
+# rule_engine/cloud/personalised_analyzer.py) learns this specific device's
+# real baseline over time and adjusts effective thresholds per-device — these
+# ranges are just the cold-start fallback before enough history exists.
+# ---------------------------------------------------------------------------
+baseline:
+  heart_rate:
+    min: 55
+    max: 100
+    unit: bpm
+    sampling_interval_ms: 1000
+
+  spo2:
+    min: 95
+    max: 99
+    unit: percent
+    sampling_interval_ms: 1000
+
+  heart_rate_variability:
+    min: 20
+    max: 80
+    unit: ms
+    sampling_interval_ms: 1000
+
+  # New territory — no existing healthcare persona has a temperature field
+  # (only worker_safety personas do, as skin_temperature). Display-only per
+  # explicit developer instruction: shown in Grafana/operator UI, never
+  # wired into PersonalisedAnalyzer._extract_features() or any alerting
+  # path. No warning/critical tier below because it doesn't need one.
+  body_temperature:
+    min: 36.0
+    max: 37.5
+    unit: celsius
+    sampling_interval_ms: 1000
+
+# ---------------------------------------------------------------------------
+# Clinical thresholds — standard population boundaries, not patient-specific.
+# Mirrored as hardcoded C++ constants in the wrist-unit firmware
+# (MQTTConfig.h) — keep both in sync manually, same accepted tradeoff as
+# cardiac_patient_sim.ino's classifyHeartRate()/classifySpo2()/classifyHrv().
+#
+# body_temperature has no threshold here — it never drives condition/alert
+# logic (see baseline block above), so the firmware always publishes it
+# with a hardcoded "normal" condition rather than a real classification.
+# ---------------------------------------------------------------------------
+thresholds:
+  heart_rate_high: 100      # bpm — tachycardia boundary
+  heart_rate_low: 50        # bpm — bradycardia boundary
+  spo2_low: 93              # percent — low oxygen alarm
+  hrv_low: 20               # ms — low HRV alarm
+
+# ---------------------------------------------------------------------------
+# Noise profile — unused for this persona. Values always come from real
+# sensors, never the Python simulator's scripted signal generation. Kept as
+# schema-consistent placeholders (one per baseline sensor, required by
+# persona_loader.py's validation) rather than omitted, in case this persona
+# is ever driven by the simulator for bench testing without hardware.
+# ---------------------------------------------------------------------------
+noise_profile:
+  heart_rate:             gaussian
+  spo2:                   quantization
+  heart_rate_variability: gaussian
+  body_temperature:       drift
+
+# ---------------------------------------------------------------------------
+# Sensor correlations — none. Real sensor readings don't need scripted
+# leader/follower coupling; that only applies to generated signals.
+# ---------------------------------------------------------------------------
+correlations: []

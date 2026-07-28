@@ -2,6 +2,7 @@ export type RiskLevel = 'none' | 'low' | 'medium' | 'high' | 'critical';
 export type PatientStatus = 'running' | 'idle' | 'stopped' | 'error';
 export type AlertSeverity = 'info' | 'warning' | 'critical' | 'emergency';
 export type AlertSource = 'edge' | 'cloud';
+export type PatientSource = 'simulated' | 'hardware';
 
 export interface VitalsReading {
   timestamp: number;
@@ -37,6 +38,7 @@ export interface PatientState {
   device_id: string;
   label: string;
   status: PatientStatus;
+  source: PatientSource;
   scenario_id: string;
   persona_id: string;
   current_phase: string;
@@ -69,10 +71,17 @@ export interface CatalogResponse {
   catalog: ScenarioCatalogEntry[];
 }
 
+export interface PersonasResponse {
+  personas: string[];
+}
+
 export interface AddPatientPayload {
   label: string;
-  scenario_path: string;
+  source?: PatientSource;
+  scenario_path?: string;
   compression?: number;
+  device_id?: string;
+  persona_id?: string;
 }
 
 export interface AddPatientResponse {

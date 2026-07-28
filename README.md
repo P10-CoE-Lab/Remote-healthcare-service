@@ -112,6 +112,32 @@ npm run dev      # starts Vite dev server at http://localhost:5173
 | `elderly_hypertensive.yaml` | Elderly patient with hypertension |
 | `post_surgery_recovery.yaml` | Post-cardiac-surgery recovery patient |
 | `young_arrhythmia.yaml` | Young patient with arrhythmia |
+| `generic_wearable_patient.yaml` | Real-hardware wearer (no scripted narrative) — see [Hardware Devices](#hardware-devices) |
+
+---
+
+## Hardware Devices
+
+Two physical devices publish real sensor data into the same pipeline as the
+Python simulator, using the exact same MQTT contract (`iots/{poc_type}/{persona_id}/{sensor_name}`)
+so the rest of the stack (Telegraf, InfluxDB, Grafana, rule engine, operator UI)
+cannot tell a real device apart from a simulated one:
+
+| Device | Firmware | `device_id` | Persona |
+|---|---|---|---|
+| Cardiac patient sim (scripted playback on real hardware) | `hardware_test/ESP32_firmware/cardiac_patient_sim.ino` | `hw-cardiac-01` | `cardiac_patient` |
+| Wrist unit (real MAX30102 PPG + ADXL345 accel + TMP102 temp) | `hardware_test/ESP32_firmware/WorkerSafety-ESP32C6/workersafety/` | `hw-wrist-01` | `generic_wearable_patient` |
+
+The wrist unit is a real wearable — its `heart_rate`/`spo2`/`heart_rate_variability`
+readings go to `0` with `quality: "bad"` and `fault_active: true` whenever a finger
+isn't on the sensor (rather than a fake number), so the app layer never mistakes
+"no data" for a genuine clinical reading. `body_temperature` is published for
+display only and never drives alerting. Register a hardware device as a patient
+card via the "Real Hardware" toggle in Add Patient — only one hardware patient
+can be registered at a time.
+
+To add a live patient card for the wrist unit, add a patient with source
+`hardware`, `device_id: hw-wrist-01`, `persona_id: generic_wearable_patient`.
 
 ---
 
